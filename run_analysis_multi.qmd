@@ -1,0 +1,437 @@
+---
+title: "Honours Analysis 2025 - Multi"
+format: html
+embed-resources: true
+editor: visual
+execute-dir: project
+---
+
+```{r}
+#| output: false
+
+# load libraries
+library(afex)
+library(emmeans)
+library(data.table)
+library(ggpubr)
+library(tidyverse)
+library(stringr)
+
+# set emmeans option to multivariate
+afex_options(emmeans_model = "multivariate") # use multivariate for RM designs
+```
+
+# Multi-tasking experiment
+
+```{r}
+# assign experiment label
+exp <- 'multi'
+
+# load data
+avg_multi <- fread('data/exp-multi_avg.csv')
+avg_multi_mts <- fread('data/exp-multi_mts_avg.csv')
+
+```
+
+## Testing session
+
+```{r}
+# assign session label
+ses <- 'test'
+
+# change factor level names
+avg_multi[, switch := ifelse(switch==0, 'non-switch', 'switch')]
+avg_multi[, train_type := ifelse(train_type==1,'stable', 'variable')]
+avg_multi[, ses := ifelse(ses==2, 'training', 'testing')]
+
+## define contrasts for analysis
+
+## main effects
+# main effect of train type
+b <- list(
+  stable_varaible = rep(c(1/6, -1/6), each=6)
+)
+# main effect of multi_trial
+w1 <- list(
+  first_sub = rep(c(1/6, -1/6, 1/6, -1/6), each=3)
+)
+# compare levels of multi_cond
+w2 <- list(
+  neither_none = rep(c(1/4, -1/4, 0), times=4),
+  neither_other = rep(c(1/4, 0, -1/4), times=4),
+  none_other = rep(c(0, 1/4, -1/4), times=4)
+)
+
+## interaction effects
+# multipy coefficients by 6 so they sum back to 1
+b_w1_int <- list(
+  train_type_by_multi_trial = (b$stable_varaible*w1$first_sub)*6 
+)
+
+b_w2_int <- list(
+  train_type_by_multi_cond_1 = (b$stable_varaible*w2$neither_none)*6, 
+  train_type_by_multi_cond_2 = (b$stable_varaible*w2$neither_other)*6,
+  train_type_by_multi_cond_3 = (b$stable_varaible*w2$none_other)*6
+)
+
+w1_w2_int <- list(
+  multi_trial_by_multi_cond_1 = (w1$first_sub*w2$neither_none)*6,
+  multi_trial_by_multi_cond_2 = (w1$first_sub*w2$neither_other)*6,
+  multi_trial_by_multi_cond_3 = (w1$first_sub*w2$none_other)*6
+)
+# multipy coefficients by 6*6 so they sum back to 1
+b_w1_w2_int <- list(
+  b_w1_w2_1 = (b$stable_varaible*w1$first_sub*w2$neither_none)*36,
+  b_w1_w2_2 = (b$stable_varaible*w1$first_sub*w2$neither_other)*36,
+  b_w1_w2_3 = (b$stable_varaible*w1$first_sub*w2$none_other)*36
+)
+
+## Effects we expect to see in advance 
+# can use these to create contrasts to look at simple effects?
+b_levels = list(
+  stable = rep(c(1, 0), each=6),
+  variable = rep(c(0, 1), each=6)
+)
+w1_levels = list(
+  first = rep(c(1, 0, 1, 0), each=3),
+  last = rep(c(0, 1, 0, 1), each=3)
+)
+w2_levels = list(
+  neither = rep(c(1, 0, 0), times=4),
+  none = rep(c(0, 1, 0), times=4),
+  other = rep(c(0, 0, 1), times=4)
+)
+
+# e.g., Effect of multi_cond might be present on first but not subsequent trials - might be better to locate these in the relevant code chunk, rather than at the top with the generic contrasts
+w1_w2_simp = list(
+  multi_cond_1_at_multi_trial_1 = (w2$neither_none*w1_levels$first)*2,
+  multi_cond_2_at_multi_trial_1 = (w2$neither_other*w1_levels$first)*2,
+  multi_cond_3_at_multi_trial_1 = (w2$none_other*w1_levels$first)*2,
+  multi_cond_1_at_multi_trial_2 = (w2$neither_none*w1_levels$last)*2,
+  multi_cond_2_at_multi_trial_2 = (w2$neither_other*w1_levels$last)*2,
+  multi_cond_3_at_multi_trial_2 = (w2$none_other*w1_levels$last)*2
+)
+```
+
+### Accuracy
+
+```{r}
+# assign variable label
+var <- 'accuracy'
+
+# specify model
+mdl <- aov_ez(id = 'sub',
+              within = c('multi_cond', 'multi_trial'), 
+              between = 'train_type',
+              dv = 'accuracy_mean',
+              data = avg_multi[ses=='testing'])
+
+# get estimated marginal means from the model
+emm_int <- emmeans(mdl, c('multi_cond', 'multi_trial', 'train_type'))
+
+# inspect means
+emm_int
+
+# compute contrasts
+(cw1 <- contrast(emm_int, w1))
+(cw2 <- contrast(emm_int, w2, adjust='bonferroni'))
+(cb <- contrast(emm_int, b))
+
+# two different ways of testing the multi_trial vs multi_cond interaction - not sure which is best? Also you mentioned that the interaction contrasts are no longer orthogonal, so not sure if I've done these right
+(cw1w2 <- contrast(emm_int, w1_w2_int, adjust='bonferroni'))
+(cw1w2 <- contrast(emm_int, w1_w2_simp, adjust='bonferroni'))
+
+
+# plot result
+afex_plot(mdl, 
+          x = 'multi_cond', 
+          trace = 'train_type', 
+          panel = 'multi_trial',
+          error = "within", 
+          data_plot = F) + 
+  theme_pubclean()
+
+# save result
+dt <- as.data.table(rbind(data.frame(cw1), 
+                          data.frame(cw2), 
+                          data.frame(cb))) # add new rows as necessary 
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(dt, fln)
+```
+
+### Setting errors
+
+```{r}
+var <- 'setting_errors'
+
+# specify model
+mdl <- aov_ez(id = 'sub',
+              within = c('multi_cond', 'multi_trial'), 
+              between = 'train_type',
+              dv = 'setting_errors_mean',
+              data = avg_multi[ses=='testing'])
+
+# get estimated marginal means from the model
+emm_int <- emmeans(mdl, c('multi_cond', 'multi_trial', 'train_type'))
+
+# inspect means
+emm_int
+
+# compute contrasts
+(cw1 <- contrast(emm_int, w1))
+(cw2 <- contrast(emm_int, w2, adjust='bonferroni'))
+(cb <- contrast(emm_int, b))
+
+# plot result
+afex_plot(mdl, 
+          x = 'multi_cond', 
+          trace = 'train_type', 
+          panel = 'multi_trial',
+          error = "within", 
+          data_plot = F) + 
+  theme_pubclean()
+
+# save result
+dt <- as.data.table(rbind(data.frame(cw1), 
+                          data.frame(cw2), 
+                          data.frame(cb))) # add new rows as necessary 
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(dt, fln)
+```
+
+### General errors
+
+```{r}
+var <- 'general_errors'
+
+# specify model
+mdl <- aov_ez(id = 'sub',
+              within = c('multi_cond', 'multi_trial'), 
+              between = 'train_type',
+              dv = 'general_errors_mean',
+              data = avg_multi[ses=='testing'])
+
+# get estimated marginal means from the model
+emm_int <- emmeans(mdl, c('multi_cond', 'multi_trial', 'train_type'))
+
+# inspect means
+emm_int
+
+# compute contrasts
+(cw1 <- contrast(emm_int, w1))
+(cw2 <- contrast(emm_int, w2, adjust='bonferroni'))
+(cb <- contrast(emm_int, b))
+
+# plot result
+afex_plot(mdl, 
+          x = 'multi_cond', 
+          trace = 'train_type', 
+          panel = 'multi_trial',
+          error = "within", 
+          data_plot = F) + 
+  theme_pubclean()
+
+# save result
+dt <- as.data.table(rbind(data.frame(cw1), 
+                          data.frame(cw2), 
+                          data.frame(cb))) # add new rows as necessary 
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(dt, fln)
+```
+
+### RT first correct
+
+```{r}
+var <- 'rt_first_cor'
+
+# specify model
+mdl <- aov_ez(id = 'sub',
+              within = c('multi_cond', 'multi_trial'), 
+              between = 'train_type',
+              dv = 'rt_first_correct_mean',
+              data = avg_multi[ses=='testing'])
+
+# get estimated marginal means from the model
+emm_int <- emmeans(mdl, c('multi_cond', 'multi_trial', 'train_type'))
+
+# inspect means
+emm_int
+
+# compute contrasts
+(cw1 <- contrast(emm_int, w1))
+(cw2 <- contrast(emm_int, w2, adjust='bonferroni'))
+(cb <- contrast(emm_int, b))
+
+# plot result
+afex_plot(mdl, 
+          x = 'multi_cond', 
+          trace = 'train_type', 
+          panel = 'multi_trial',
+          error = "within", 
+          data_plot = F) + 
+  theme_pubclean()
+
+# save result
+dt <- as.data.table(rbind(data.frame(cw1), 
+                          data.frame(cw2), 
+                          data.frame(cb))) # add new rows as necessary 
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(dt, fln)
+
+```
+
+### RT subs correct
+
+```{r}
+var <- 'rt_subs_cor'
+
+# specify model
+mdl <- aov_ez(id = 'sub',
+              within = c('multi_cond', 'multi_trial'), 
+              between = 'train_type',
+              dv = 'rt_subs_correct_mean',
+              data = avg_multi[ses=='testing'])
+
+# get estimated marginal means from the model
+emm_int <- emmeans(mdl, c('multi_cond', 'multi_trial', 'train_type'))
+
+# inspect means
+emm_int
+
+# compute contrasts
+(cw1 <- contrast(emm_int, w1))
+(cw2 <- contrast(emm_int, w2, adjust='bonferroni'))
+(cb <- contrast(emm_int, b))
+
+# plot result
+afex_plot(mdl, 
+          x = 'multi_cond', 
+          trace = 'train_type', 
+          panel = 'multi_trial',
+          error = "within", 
+          data_plot = F) + 
+  theme_pubclean()
+
+# save result
+dt <- as.data.table(rbind(data.frame(cw1), 
+                          data.frame(cw2), 
+                          data.frame(cb))) # add new rows as necessary 
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(dt, fln)
+```
+
+## Training session
+
+```{r}
+ses <- 'train'
+
+## define contrasts for analysis
+# effect of train_type
+stable_vs_variable <- list(stable_vs_variable = c(1, -1))
+```
+
+### Setting errors
+
+```{r}
+var <- 'setting_errors'
+
+# specify model
+mdl <- aov_ez(id = 'sub',
+              # within = '', 
+              between = 'train_type',
+              dv = 'setting_errors_mean',
+              data = avg_multi[ses=='training' & switch=='non-switch',])
+
+# get estimated marginal means from the model
+emm_btw <- emmeans(mdl, 'train_type')
+
+# inspect means
+emm_btw
+
+# compute contrasts
+(cb <- contrast(emm_btw, stable_vs_variable))
+
+# plot result
+afex_plot(mdl, 
+          x = 'train_type', 
+          # trace = '', 
+          error = "between", 
+          data_plot = F) + 
+  theme_pubclean()
+
+# save result
+dt <- as.data.table(data.frame(cb)) 
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(dt, fln)
+```
+
+### General errors
+
+```{r}
+var <- 'general_errors'
+
+# specify model
+mdl <- aov_ez(id = 'sub',
+              # within = '', 
+              between = 'train_type',
+              dv = 'general_errors_mean',
+              data = avg_multi[ses=='training' & switch=='non-switch',])
+
+# get estimated marginal means from the model
+emm_btw <- emmeans(mdl, 'train_type')
+
+# inspect means
+emm_btw
+
+# compute contrasts
+(cb <- contrast(emm_btw, stable_vs_variable))
+
+# plot result
+afex_plot(mdl, 
+          x = 'train_type', 
+          # trace = '', 
+          error = "between", 
+          data_plot = F) + 
+  theme_pubclean()
+
+# save result
+dt <- as.data.table(data.frame(cb)) 
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(dt, fln)
+```
+
+# Working Memory Task
+
+```{r}
+task <- 'wmt'
+
+# change factor level names
+avg_multi_mts <- avg_multi_mts[unique(avg_multi[, .(sub, train_type)]), on='sub']
+avg_multi_mts[, cond := ifelse(cond=='nc', 'neither', 'other')]
+avg_multi_mts[, stage := ifelse(stage=='3', 'testing', 'initial')]
+avg_multi_mts[, train_type := ifelse(train_type==1, 'stable', 'variable')]
+setnames(avg_multi_mts, 'stage', 'ses') # rename stage to ses 
+
+## define contrasts for analysis
+# look at effect of sub_ses at each level of train_type
+first_vs_last <- list(stable = c(-1, 0, 1, 0),
+                      variable = c(0, -1, 0, 1))
+# look at effect of train_type at each level of sub_ses
+stable_vs_variable <- list(first = c(1, -1, 0, 0),
+                           last = c(0, 0, 1, -1))
+
+```
