@@ -274,6 +274,30 @@ cntrsts_fam_group_by_first_vs_subs_by_multi_vs_sing
 
 Also a resounding no :)
 
+Now I write a function that automatically applies these contrast families to a table of emms, given you have the list of families and the dv -
+
+```{r}
+
+# a function to rule them all
+list_of_contrast_lists <- list(fam_multi_vs_sing_first, 
+                               fam_multi_neither_vs_other,
+                               fam_group_w_one_within,
+                               fam_group_by_first_vs_subs_by_multi_vs_sing)
+
+get_all_contrsts <- function(this_dv, list_of_contrast_lists){
+  
+  # specify model
+  mdl <- aov_ez(id = 'sub',
+                within = c('multi_cond', 'multi_trial'), 
+                between = 'train_type',
+                dv = this_dv,
+                data = avg_multi[ses=='testing'])
+  emm_int <- emmeans(mdl, c('multi_cond', 'multi_trial', 'train_type'))
+  do.call(rbind, lapply(list_of_contrast_lists, function(x) summary(contrast(emm_int, x, adjust='bonferroni'))))
+}
+
+```
+
 ### Accuracy
 
 ```{r}

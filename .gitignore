@@ -4,3 +4,4 @@ data
 .Rhistory
 .gitignore
 *.Rproj
+*_KG.qmd
