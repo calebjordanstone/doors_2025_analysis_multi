@@ -67,7 +67,7 @@ Here I define a set of contrasts according to the following procedure/principles
 1.  We have pre-defined hypotheses about specific differences we are interested in
 2.  We have collected data using a factorial ANOVA design
 3.  Because of #1, we can define a priori contrast vectors we are interested in testing
-4.  Because of #2, we can determine that contrast vectors that are orthogonal to each other constitute independent tests. Those that are not orthogonal to each other constitute dependent tests. Thus we group our contrasts into sets. Within a set, contrasts should be non-orthogonal. Across sets, they should be non-orthogonal. This creates our families of tests.
+4.  Because of #2, we can determine that contrast vectors that are orthogonal to each other constitute independent tests. Those that are not orthogonal to each other constitute dependent tests. Thus we group our contrasts into sets. Within a set, contrasts should be non-orthogonal. Across sets, they should be orthogonal. This creates our families of tests.
 5.  Each family should be controlled at $\alpha$ = .05. If there is only one contrast in the family, then the effect is tested at p=.05. If there is more than one contrast in the family, then we apply a Bonferonni correction to the tests (as the family is a priori defined).
 
 ```{r}
