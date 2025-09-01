@@ -16,6 +16,9 @@ Load libraries and import data
 ```{r}
 #| output: false
 
+# KG: need code to add required folders if they don't exist - e.g. 'res'
+# KG: can be handy to put a file path diagram above, so people know what structure they should have for things to work
+
 # load libraries
 library(afex)
 library(emmeans)
@@ -72,6 +75,9 @@ Here I define a set of contrasts according to the following procedure/principles
 
 ```{r}
 #| output: false
+
+# KG: I reckon delete this code block to avoid duplicate code.
+
 # adapting the code above to test the key hypotheses of the study. Under each section of comments, I have built up to the contrast that tests the hypothesis of interest. Then I test for orthogonality, to guide how to control the error rate during hypothesis testing.
 
 ngrps <- 2
@@ -149,13 +155,13 @@ Re-wrote the contrasts above to help me get my head around it - all the vectors 
 # convenience vectors
 multi_cond <- list(
   neither_other = rep(c(1, 0, -1), times=4),
-  none_other = rep(c(0, 1, -1), times=4),
+  none_other = rep(c(0, 1, -1), times=4), # KG: why not also none_neither, if going this route?
   none_multi = rep(c(0.5, -1, 0.5), times=4)
 )
 train_type = list(
   int = rep(c(-1, 1), each=6)
 )
-multi_trial = list(
+multi_trial = list( 
   int = rep(c(1, -1, 1, -1), each =3),
   first = rep(c(1, 0, 1, 0), each=3)
 )
@@ -195,7 +201,7 @@ all_contrasts <- matrix(c(none_v_multi_at_fst,
                         ncol=n_contrasts)
 G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
 G # look at G
-# 1 & 4 are non-orthogonal
+# 1 & 4 are non-orthogonal # KG: these numbers don't match to the output of G, I get 1 & 2, 4 & 6, 5 & 7. can you update the comments?
 # 2 & 5 are non-orthogonal
 # 3 & 7 are non-orthogonal
 # Bonferroni adjustment needs to be applied to the pairs of non-orthogonal contrasts. The rest are independent to the others so can each be tested at p<.05. 
@@ -269,7 +275,7 @@ res <- get_all_contrasts(var, list_of_contrast_lists)
 
 # show results
 res$contrasts
-res$plot
+res$plot # KG: I only get one plot. Is that what you meant?
 
 # save result
 fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
@@ -316,6 +322,8 @@ write_csv(res$dt, fln)
 ### RT first correct
 
 ```{r}
+
+# 
 var <- 'rt_first_correct_mean'
 
 # compute contrasts
@@ -356,6 +364,9 @@ ses <- 'train'
 Define contrasts for analysis. Copied these from the flexibility experiment - do we need to test for orthogonality in the same was as for the testing session? We didn't do that in the flexibility code
 
 ```{r}
+
+# KG: re the above - lets revisit the flexibility analysis after this one to check we're happy.
+# KG: also, the first vs half thing was of interest to Shaily. Do you think its of interest to the paper we'd write here? Let's discuss
 
 # look at effect of sub_ses at each level of train_type
 first_vs_last <- list(stable = c(-1, 0, 1, 0),
@@ -415,6 +426,9 @@ get_all_contrasts <- function(this_dv, list_of_contrast_lists){
 ### Setting errors
 
 ```{r}
+
+# KG: can you analyse accuracy
+
 # assign variable label
 var <- 'setting_errors_mean'
 
