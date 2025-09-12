@@ -11,13 +11,27 @@ execute:
   message: false
 ---
 
-Load libraries and import data
+Load libraries, import data, and other housekeeping
 
 ```{r}
 #| output: false
 
-# KG: need code to add required folders if they don't exist - e.g. 'res'
-# KG: can be handy to put a file path diagram above, so people know what structure they should have for things to work
+# required file path diagram
+"
+.
+└── R_project/
+    ├── data/
+    │   └── ... datafiles go here
+    ├── res/
+    │   └── ... output goes here
+    └── run_analysis_multi_.qmd
+"
+
+# set output path
+project_path <- getwd()
+if (!dir.exists(file.path(project_path, "res"))) {
+  dir.create(file.path(project_path, "res"))
+}
 
 # load libraries
 library(afex)
@@ -35,7 +49,6 @@ exp <- 'multi'
 
 # load data
 avg_multi <- fread('data/exp-multi_avg.csv')
-avg_multi_ss <- fread('data/exp-multi_avg-ss.csv')
 avg_multi_mts <- fread('data/exp-multi_mts_avg.csv')
 
 # change factor level names
@@ -43,25 +56,13 @@ avg_multi[, switch := ifelse(switch==0, 'non-switch', 'switch')]
 avg_multi[, train_type := ifelse(train_type==1,'stable', 'variable')]
 avg_multi[, ses := ifelse(ses==2, 'training', 'testing')]
 
-avg_multi_ss[, switch := ifelse(switch==0, 'non-switch', 'switch')]
-avg_multi_ss[, train_type := ifelse(train_type==1,'stable', 'variable')]
-avg_multi_ss[, ses := ifelse(ses==2, 'training', 'testing')]
-avg_multi_ss[, subses := ifelse(subses==1, 'first', 'last')]
-
 avg_multi_mts <- avg_multi_mts[unique(avg_multi[, .(sub, train_type)]), on='sub']
 avg_multi_mts[, cond := ifelse(cond=='nc', 'neither', 'other')]
 avg_multi_mts[, stage := ifelse(stage=='3', 'testing', 'initial')]
 setnames(avg_multi_mts, 'stage', 'ses') 
-
 ```
 
 ## Testing session
-
-```{r}
-# assign session label
-ses <- 'test'
-
-```
 
 #### Defining contrasts of interest
 
@@ -76,86 +77,13 @@ Here I define a set of contrasts according to the following procedure/principles
 ```{r}
 #| output: false
 
-# KG: I reckon delete this code block to avoid duplicate code.
-
-# adapting the code above to test the key hypotheses of the study. Under each section of comments, I have built up to the contrast that tests the hypothesis of interest. Then I test for orthogonality, to guide how to control the error rate during hypothesis testing.
-
-ngrps <- 2
-n_multi <- 3 # levels of multitasking
-n_trial_type <- 2 # levels of search trial type (first vs subsequent)
-
-##### apriori (to apply bonferroni correction on orthogonal sets of contrasts)
-# first, we hypothesise that performance should be different on the neither/other trials compared to the none trials, for the first of the search trials
-multi_vs_sing_first <- rep(c(1/2, -1, 1/2, 0, 0, 0), times=ngrps)
-
-# next, we hypothesise that the performance difference on other trials should be worse than on neither trials, for the first of the search trials.
-multi_neither_vs_other <- rep(c(1, 0, -1, 0, 0, 0), times=ngrps)
-
-# next we predict that this difference on other vs neither trials should be worse for the variable group, compared to the stable group, as the latter group should suffer less cross-task interference 
-group <- rep(c(-1, 1), each=n_multi*n_trial_type)
-group_by_multi_neither_vs_other <- multi_neither_vs_other * group
-
-# next, we want to know, is the difference between neither/other trials vs none trials, different for first, compared to subsequent search trials? i.e. we predict that the impact of multitasking should reduce from the first to subsequent search trials
-first_vs_subs <- rep(c(1, 1, 1, -1, -1, -1), times=ngrps)
-multi_vs_sing_both <- rep(c(1/2, -1, 1/2), times=ngrps*n_trial_type)
-first_vs_subs_by_multi_vs_sing <- first_vs_subs * multi_vs_sing_both 
-
-# next, we want to know, is the difference between neither than other different for first to subsequent search trials. We predict that any difference should reduce
-multi_neither_vs_other_full <- c(1, 0, -1, 1, 0, -1)
-first_vs_subs_by_neither_vs_other <- first_vs_subs * multi_neither_vs_other_full
-
-
-
-# last, we predict that both of the above effects should be smaller for the variable group compared to the stable group
-group_by_first_vs_subs_by_multi_vs_sing <- group * first_vs_subs_by_multi_vs_sing
-group_by_first_vs_subs_by_neither_vs_other <- group * first_vs_subs_by_neither_vs_other
-
-# now we have our key contrasts, we can check if they are orthogonal.
-# first, I turn them into a matrix
-n_contrasts <- 7
-all_contrasts <- matrix(c(multi_vs_sing_first, # 1
-                          multi_neither_vs_other, # 2
-                          group_by_multi_neither_vs_other, # 3 
-                          first_vs_subs_by_multi_vs_sing, # 4
-                          first_vs_subs_by_neither_vs_other, # 5
-                          group_by_first_vs_subs_by_multi_vs_sing, # 6
-                          group_by_first_vs_subs_by_neither_vs_other), byrow=FALSE, ncol=n_contrasts)
-# compute the gram matrix (i.e. the dot product between all pairs of vectors)
-G <- t(all_contrasts) %*% all_contrasts # note that if the vectors are all orthogonal, then the off diagonal enties will be zero, any non-orthognal contrasts will have an off-diagonal element that is different to zero
-G # look at G
-# I can see that contrasts 1 & 4 are correlated (non-orthogonal) so bonferroni adjustment needs to be applied to these two together, when testing the contrast. 
-# 2 & 5 are also non-orthogonal
-# 3 & 7 are also non-orthogonal
-# The rest are independent to the others so can each be tested at p<.05. So lets define the families now
-# I am making the families manually. One day, dream coder Kelly or Caleb will automate this based on the indexes of the off-diagonal elements > 0 :)
-fam_multi_vs_sing_first <- list(multi_vs_sing_first = multi_vs_sing_first, # 1
-                               first_vs_subs_by_multi_vs_sing = first_vs_subs_by_multi_vs_sing) # 4
-                                   
-fam_multi_neither_vs_other <- list(multi_neither_vs_other = multi_neither_vs_other, #2
-                                   first_vs_subs_by_neither_vs_other = first_vs_subs_by_neither_vs_other) #5
-
-fam_group_w_one_within <- list(group_by_multi_neither_vs_other = group_by_multi_neither_vs_other, # 3
-                                           group_by_first_vs_subs_by_neither_vs_other = group_by_first_vs_subs_by_neither_vs_other) # 7
-
-fam_group_by_first_vs_subs_by_multi_vs_sing <- list(group_by_first_vs_subs_by_multi_vs_sing=group_by_first_vs_subs_by_multi_vs_sing) # 6
-
-# note that any tests beyond this point will be post-hoc simple effect comparisons, will be non-orthognal. After each of the above contrast tests, we should determine any post-hoc tests we want to do, which will determine how we control for them.
-
-list_of_contrast_lists <- list(fam_multi_vs_sing_first, 
-                               fam_multi_neither_vs_other,
-                               fam_group_w_one_within,
-                               fam_group_by_first_vs_subs_by_multi_vs_sing)
-```
-
-Re-wrote the contrasts above to help me get my head around it - all the vectors it produces are the same as above
-
-```{r}
-#| output: false
+# assign session label
+ses <- 'test'
 
 # convenience vectors
 multi_cond <- list(
   neither_other = rep(c(1, 0, -1), times=4),
-  none_other = rep(c(0, 1, -1), times=4), # KG: why not also none_neither, if going this route?
+  none_other = rep(c(0, 1, -1), times=4),
   none_multi = rep(c(0.5, -1, 0.5), times=4)
 )
 train_type = list(
@@ -166,23 +94,24 @@ multi_trial = list(
   first = rep(c(1, 0, 1, 0), each=3)
 )
 
-# Note the numbers here are the same as above, but I reordered them in a way that made most sense to me
+## A priori contrasts
+ 
 # 1) Is performance worse on the neither/other (multi) trials compared to the none trials, for the first of the search trials?
 none_v_multi_at_fst <- multi_cond$none_multi*multi_trial$first
 
-# 4) Is the difference between neither/other trials vs none trials different for first compared to subsequent search trials? 
+# 2) Is the difference between neither/other trials vs none trials different for first compared to subsequent search trials? 
 none_v_multi_by_trl <- multi_cond$none_multi*multi_trial$int
 
-# 6) Is the effect of trial on the none vs. multi comparison reduced for the variable group compared to the stable group?
+# 3) Is the effect of trial on the none vs. multi comparison reduced for the variable group compared to the stable group?
 none_v_multi_by_trl_by_grp <- none_v_multi_by_trl*train_type$int
 
-# 2) Is performance worse on other trials than neither trials, for the first of the search trials?
+# 4) Is performance worse on other trials than neither trials, for the first of the search trials?
 neither_v_other_at_fst <- multi_cond$neither_other*multi_trial$first
 
-# 3) Is the difference between other vs neither trials greater for the variable group compared to the stable group?
+# 5) Is the difference between other vs neither trials greater for the variable group compared to the stable group?
 neither_v_other_at_fst_by_grp <- multi_cond$neither_other*multi_trial$first*train_type$int
 
-# 5) Is the difference between neither and other different for first compared to subsequent search trials?
+# 6) Is the difference between neither and other different for first compared to subsequent search trials?
 neither_v_other_by_trl <- multi_cond$neither_other*multi_trial$int
 
 # 7) Is the effect of trial on the neither vs. other comparison reduced for the variable group compared to the stable group?
@@ -201,24 +130,21 @@ all_contrasts <- matrix(c(none_v_multi_at_fst,
                         ncol=n_contrasts)
 G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
 G # look at G
-# 1 & 4 are non-orthogonal # KG: these numbers don't match to the output of G, I get 1 & 2, 4 & 6, 5 & 7. can you update the comments?
-# 2 & 5 are non-orthogonal
-# 3 & 7 are non-orthogonal
+# 1 & 2, 4 & 6, 5 & 7 are non-orthogonal
 # Bonferroni adjustment needs to be applied to the pairs of non-orthogonal contrasts. The rest are independent to the others so can each be tested at p<.05. 
 # Define the families now
 fam_none_v_multi <- list(none_v_multi_at_fst = none_v_multi_at_fst, # 1
-                         none_v_multi_by_trl = none_v_multi_by_trl) # 4
+                         none_v_multi_by_trl = none_v_multi_by_trl) # 2
                                    
-fam_none_v_multi_by_grp <- list(none_v_multi_by_trl_by_grp = none_v_multi_by_trl_by_grp) # 6
+fam_none_v_multi_by_grp <- list(none_v_multi_by_trl_by_grp = none_v_multi_by_trl_by_grp) # 3
 
-fam_neither_vs_other <- list(neither_v_other_at_fst = neither_v_other_at_fst, #2
-                             neither_v_other_by_trl = neither_v_other_by_trl) #5
+fam_neither_vs_other <- list(neither_v_other_at_fst = neither_v_other_at_fst, # 4
+                             neither_v_other_by_trl = neither_v_other_by_trl) # 6
 
-fam_neither_vs_other_by_grp <- list(neither_v_other_at_fst_by_grp = neither_v_other_at_fst_by_grp, # 3
+fam_neither_vs_other_by_grp <- list(neither_v_other_at_fst_by_grp = neither_v_other_at_fst_by_grp, # 5
                                     neither_v_other_by_trl_by_grp = neither_v_other_by_trl_by_grp) # 7
 
 # Note that any tests beyond this point will be post-hoc simple effect comparisons, will be non-orthognal. After each of the above contrast tests, we should determine any post-hoc tests we want to do, which will determine how we control for them.
-
 
 list_of_contrast_lists <- list(fam_none_v_multi, 
                                fam_none_v_multi_by_grp, 
@@ -275,7 +201,7 @@ res <- get_all_contrasts(var, list_of_contrast_lists)
 
 # show results
 res$contrasts
-res$plot # KG: I only get one plot. Is that what you meant?
+res$plot
 
 # save result
 fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
@@ -311,19 +237,48 @@ res <- get_all_contrasts(var, list_of_contrast_lists)
 res$contrasts
 res$plot
 
-# post-hoc test to run: none vs. other at first: 
-# none_v_other_at_fst <- multi_cond$none_other*multi_trial$first
+```
+Run post-hoc tests. 
 
-# save result
+```{r}
+
+# 1) From the plot above, the difference between 'none' vs 'multi' appears to be driven by the difference between 'neither' vs 'other' trails. Here we test for non-sig difference between 'none' vs 'other' trials
+none_v_other_at_fst <- multi_cond$none_other*multi_trial$first
+
+# 2) Then we repeat the above analysis with the group interaction
+none_v_other_at_fst_by_grp <- none_v_other_at_fst*train_type$int
+
+# Check if contrasts are orthogonal
+n_contrasts <- 2
+all_contrasts <- matrix(c(none_v_other_at_fst,
+                          none_v_other_at_fst_by_grp),
+                        byrow=FALSE,
+                        ncol=n_contrasts)
+G <- t(all_contrasts) %*% all_contrasts
+#G # look at G - all are orthogonal
+fam_none_v_other <- list(none_v_other_at_fst = none_v_other_at_fst) # 1
+
+fam_none_v_other_by_grp <- list(none_v_other_at_fst_by_grp = none_v_other_at_fst_by_grp) # 2
+
+list_of_posthoc_contrast_lists <- list(fam_none_v_other,
+                                       fam_none_v_other_by_grp)
+
+
+# compute post-hoc contrasts
+res_ph <- get_all_contrasts(var, list_of_posthoc_contrast_lists)
+
+# show results
+res_ph$contrasts
+
+# save results
 fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
-write_csv(res$dt, fln)
+write_csv(rbind(res$dt, res_ph$dt), fln)
+
 ```
 
 ### RT first correct
 
 ```{r}
-
-# 
 var <- 'rt_first_correct_mean'
 
 # compute contrasts
@@ -357,35 +312,19 @@ write_csv(res$contrasts, fln)
 
 ## Training session
 
+Define contrasts for training data.
+
 ```{r}
 ses <- 'train'
-```
 
-Define contrasts for analysis. Copied these from the flexibility experiment - do we need to test for orthogonality in the same was as for the testing session? We didn't do that in the flexibility code
-
-```{r}
-
-# KG: re the above - lets revisit the flexibility analysis after this one to check we're happy.
-# KG: also, the first vs half thing was of interest to Shaily. Do you think its of interest to the paper we'd write here? Let's discuss
-
-# look at effect of sub_ses at each level of train_type
-first_vs_last <- list(stable = c(-1, 0, 1, 0),
-                      variable = c(0, -1, 0, 1))
-# look at effect of train_type at each level of sub_ses
-stable_vs_variable <- list(first = c(1, -1, 0, 0),
-                           last = c(0, 0, 1, -1))
-# interaction effect
-interaction <- list(interaction = c(0.5, -0.5, -0.5, 0.5))
-# main effect of train_type
-train_type <- list(train_type = c(-0.5, 0.5, -0.5, 0.5))
+# look at main effect of train_type
+stable_vs_variable <- list(stable_vs_variable = c(-1, 1))
 
 # combine families
-list_of_contrast_lists <- list(interaction,
-                               first_vs_last, 
-                               stable_vs_variable)
+list_of_contrast_lists <- list(stable_vs_variable)
 ```
 
-Edit the contrasts function for the training data
+Edit the contrasts function.
 
 ```{r}
 # a function to rule them all
@@ -393,19 +332,17 @@ get_all_contrasts <- function(this_dv, list_of_contrast_lists){
   
   # specify model
   mdl <- aov_ez(id = 'sub',
-                within = 'subses', 
                 between = 'train_type',
                 dv = this_dv,
-                data = avg_multi_ss[ses=='training' & switch=='non-switch'])
+                data = avg_multi[ses=='training' & switch=='non-switch'])
   
   # generate means
-  emm_int <- emmeans(mdl, c('train_type', 'subses'))
+  emm_int <- emmeans(mdl, 'train_type')
   
     # plot 
   p <- afex_plot(mdl, 
-          x = 'subses', 
-          trace = 'train_type', 
-          error = "none", 
+          x = 'train_type', 
+          error = "between", 
           data_plot = F) + 
   theme_pubclean()
   
@@ -423,11 +360,29 @@ get_all_contrasts <- function(this_dv, list_of_contrast_lists){
 
 ```
 
-### Setting errors
+### Accuracy
 
 ```{r}
 
-# KG: can you analyse accuracy
+# assign variable label
+var <- 'accuracy_mean'
+
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+res$plot
+
+# save result
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(res$dt, fln)
+
+```
+
+### Setting errors
+
+```{r}
 
 # assign variable label
 var <- 'setting_errors_mean'
@@ -465,14 +420,13 @@ write_csv(res$dt, fln)
 
 ## Working memory task
 
-```{r}
-task <- 'wmt'
-
-```
-
 Define contrasts for analysis
 
 ```{r}
+#| output: false
+#| 
+task <- 'wmt'
+
 #| output: false
 # convenience vectors
 sess <- list(
