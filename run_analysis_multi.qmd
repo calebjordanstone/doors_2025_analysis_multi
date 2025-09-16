@@ -1,6 +1,10 @@
 ---
 title: "Honours Analysis 2025 - Multi-tasking experiment"
 format: html
+toc: true
+toc-title: Contents
+toc-location: left
+toc-expand: true
 code-fold: true
 code-summary: "Show code"
 embed-resources: true
@@ -238,7 +242,8 @@ res$contrasts
 res$plot
 
 ```
-Run post-hoc tests. 
+
+Run post-hoc tests.
 
 ```{r}
 
@@ -514,7 +519,7 @@ get_all_contrasts <- function(this_dv, list_of_contrast_lists){
 
 ```
 
-## Accuracy
+### Accuracy
 
 ```{r}
 # assign variable label
@@ -532,7 +537,7 @@ fln <- str_glue("res/contrasts_exp-{exp}_task-{task}_{var}.csv")
 write_csv(res$dt, fln)
 ```
 
-## Reaction time
+### Reaction time
 
 ```{r}
 # assign variable label
