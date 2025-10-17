@@ -53,12 +53,22 @@ exp <- 'multi'
 
 # load data
 avg_multi <- fread('data/exp-multi_avg.csv')
+avg_multi_subRT <- fread('data/exp-multi_avg_by_subRT.csv', stringsAsFactors = T)
+avg_multi_memgrp <- fread('data/exp-multi_avg_by_memgrp.csv', stringsAsFactors = T)
 avg_multi_mts <- fread('data/exp-multi_mts_avg.csv')
 
 # change factor level names
 avg_multi[, switch := ifelse(switch==0, 'non-switch', 'switch')]
 avg_multi[, train_type := ifelse(train_type==1,'stable', 'variable')]
 avg_multi[, ses := ifelse(ses==2, 'training', 'testing')]
+
+avg_multi_subRT[, switch := ifelse(switch==0, 'non-switch', 'switch')]
+avg_multi_subRT[, train_type := ifelse(train_type==1, 'variable', 'stable')]
+avg_multi_subRT[, ses := ifelse(ses==2, 'training', 'testing')]
+
+avg_multi_memgrp[, switch := ifelse(switch==0, 'non-switch', 'switch')]
+avg_multi_memgrp[, train_type := ifelse(train_type==1, 'variable', 'stable')]
+avg_multi_memgrp[, ses := ifelse(ses==2, 'training', 'testing')]
 
 avg_multi_mts <- avg_multi_mts[unique(avg_multi[, .(sub, train_type)]), on='sub']
 avg_multi_mts[, cond := ifelse(cond=='nc', 'neither', 'other')]
@@ -301,10 +311,10 @@ write_csv(res$dt, fln)
 ### RT subs correct
 
 ```{r}
-var <- 'rt_subs_cor'
+var <- 'rt_subs_correct_mean'
 
 # compute contrasts
-res <- get_all_contrasts('rt_subs_correct_mean', list_of_contrast_lists)
+res <- get_all_contrasts(var, list_of_contrast_lists)
 
 # show results
 res$contrasts
@@ -314,6 +324,384 @@ res$plot
 fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
 write_csv(res$contrasts, fln)
 ```
+
+### RT all
+
+Wrangle data so it's ready for analysis
+
+```{r}
+avg_multi_melt <- melt(avg_multi_subRT[ses=='testing'], 
+       id.vars=c('sub', 'ses', 'train_type', 'multi_trial'),
+       measure.vars=c('rt_first_correct_mean',
+                      'rt_subs_correct_1_mean',
+                      'rt_subs_correct_2_mean',
+                      'rt_subs_correct_3_mean'),
+       variable.name='door_selection',
+       value.name='rt_correct_mean')
+
+avg_multi_melt <- avg_multi_melt[,.(rt_correct_mean=mean(rt_correct_mean)), by=c('sub', 'train_type', 'multi_trial', 'door_selection')]
+
+
+```
+
+Define new set of contrasts to compare RTs across clicks
+
+```{r}
+#| output: True
+
+# convenience vectors
+door_slctn <- list(
+  fst_subs = rep(c(-1, 1/3, 1/3, 1/3), times=4),
+  sub1_sub2 = rep(c(0, -1, 1, 0), times=4),
+  sub1_sub3 = rep(c(0, -1, 0, 1), times=4),
+  sub2_sub3 = rep(c(0, 0, -1, 1), times=4)
+)
+train_type <- list(
+  int = rep(c(-1, 1), each=8)
+)
+multi_trial <- list( 
+  int = rep(c(-1, -1, -1, -1, 1, 1, 1, 1), times=2),
+  first = rep(c(1, 1, 1, 1, 0, 0, 0, 0), times=2),
+  subs = rep(c(0, 0, 0, 0, 1, 1, 1, 1), times=2)
+)
+
+## A priori contrasts
+ 
+# 1) Does RT differ on the first click relative to the rest?
+fst_v_subs <- door_slctn$fst_subs
+
+# 2) Does #1 differ by multi_trial?
+fst_v_subs_by_trl <- fst_v_subs*multi_trial$int
+
+# 3) Does #2 differ by train_type?
+fst_v_subs_by_trl_by_grp <- fst_v_subs_by_trl*train_type$int
+
+# 4) Perform pairwise comparisons for subs responses, and test for interaction with multi_trial
+sub1_v_sub2 <- door_slctn$sub1_sub2 
+sub1_v_sub2_by_trl <- door_slctn$sub1_sub2*multi_trial$int 
+
+sub1_v_sub3 <- door_slctn$sub1_sub3
+sub1_v_sub3_by_trl <- door_slctn$sub1_sub3*multi_trial$int 
+
+sub2_v_sub3 <- door_slctn$sub2_sub3
+sub2_v_sub3_by_trl <- door_slctn$sub2_sub3*multi_trial$int 
+
+# now we have our key contrasts, we can check if they are orthogonal.
+n_contrasts <- 9
+all_contrasts <- matrix(c(fst_v_subs, 
+                          fst_v_subs_by_trl, 
+                          fst_v_subs_by_trl_by_grp, 
+                          sub1_v_sub2, 
+                          sub1_v_sub2_by_trl,
+                          sub1_v_sub3,
+                          sub1_v_sub3_by_trl,
+                          sub2_v_sub3,
+                          sub2_v_sub3_by_trl), 
+                        byrow=FALSE, 
+                        ncol=n_contrasts)
+G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
+G # look at G
+# 1, 2, & 3  are non-orthogonal
+# 4, 6, & 8 are non-orthogonal
+# 5, 7, & 9 are non-orthogonal
+
+fam_fst_v_subs <- list(fst_v_subs = fst_v_subs, # 1 
+                       fst_v_subs_by_trl = fst_v_subs_by_trl, # 2 
+                       fst_v_subs_by_trl_by_grp = fst_v_subs_by_trl_by_grp) # 3
+                                    
+fam_subs <- list(sub1_v_sub2 = sub1_v_sub2, # 4
+                 sub1_v_sub3 = sub1_v_sub3, # 6
+                 sub2_v_sub3 = sub2_v_sub3) # 8
+
+fam_subs_by_trl <- list(sub1_v_sub2_by_trl = sub1_v_sub2_by_trl, # 5
+                        sub1_v_sub3_by_trl = sub1_v_sub3_by_trl, # 7
+                        sub2_v_sub3_by_trl = sub2_v_sub3_by_trl) # 9
+
+
+list_of_contrast_lists <- list(fam_fst_v_subs, 
+                               fam_subs,
+                               fam_subs_by_trl)
+```
+Edit contrasts function
+```{r}
+# a function to rule them all
+get_all_contrasts <- function(this_dv, list_of_contrast_lists){
+  
+  # specify model
+  mdl <- aov_ez(id = 'sub',
+                within = c('multi_trial', 'door_selection'), 
+                between = 'train_type',
+                dv = this_dv,
+                data = avg_multi_melt)
+  
+  # generate means
+  emm_int <- emmeans(mdl, c('door_selection', 'multi_trial', 'train_type'))
+  
+    # plot 
+  p <- afex_plot(mdl, 
+          x = 'door_selection', 
+          trace = 'train_type', 
+          panel = 'multi_trial',
+          error = "none", 
+          data_plot = F) + 
+  theme_pubclean() + 
+  theme(axis.text.x = element_text(angle = 90, 
+                                   vjust = 0.5, 
+                                   hjust=1))
+  
+  # compute contrasts
+  c <- do.call(rbind, lapply(list_of_contrast_lists, function(x) summary(contrast(emm_int, x, adjust='bonferroni'))))
+  
+  # put result in data frame
+  dt <- data.table(c)
+  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+
+  # return output
+  return(list(means=emm_int, plot=p, contrasts=c, dt=dt))
+}
+
+
+```
+
+Run analysis and save output
+
+```{r}
+var <- 'rt_correct_mean'
+
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+res$plot
+
+# save result
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(res$contrasts, fln)
+```
+
+## Test DVs by memory group
+
+Define contrasts
+
+```{r}
+#| output: false
+
+# convenience vectors
+mem_grp = list(
+  int = rep(c(-1, -1, 1, 1), times=2),
+  first = rep(c(1, 1, 0, 0), times=2),
+  subs = rep(c(0, 0, 1, 1), times=2)
+)
+train_type = list(
+  int = rep(c(-1, 1), each=4)
+)
+multi_trial = list( 
+  int = rep(c(-1, 1), times=4),
+  first = rep(c(1, 0), times=4),
+  subs = rep(c(0, 1)), times=4
+)
+
+## A priori contrasts
+ 
+# 1) Does the effect of multi_trial differ by memory group?
+trl_by_grp <- multi_trial$int*mem_grp$int
+
+# 2) Does this differ by train_type (3-way interaction)
+trl_by_grp_by_trn <- multi_trial$int*mem_grp$int*train_type$int
+
+# 3) Compare first to subsequent trials for first memory group 
+trl_at_fstg <- multi_trial$int*mem_grp$first
+
+# 4) Compare first to subsequent trials for subs memory group 
+trl_at_subg <- multi_trial$int*mem_grp$subs
+
+# 5) Compare first to subsequent memory groups for first multi_trial
+grp_at_fstt <- mem_grp$int*multi_trial$first
+
+# 6) Compare first to subsequent memory groups for subs multi_trial
+grp_at_subt <- mem_grp$int*multi_trial$subs
+
+
+# now we have our key contrasts, we can check if they are orthogonal.
+n_contrasts <- 6
+all_contrasts <- matrix(c(trl_by_grp, 
+                          trl_by_grp_by_trn, 
+                          trl_at_fstg, 
+                          trl_at_subg, 
+                          grp_at_fstt, 
+                          grp_at_subt), 
+                        byrow=FALSE, 
+                        ncol=n_contrasts)
+G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
+G # look at G
+# 1, 3, 4, 5 & 6 are non-orthogonal
+
+fam_trl_grp <- list(trl_by_grp = trl_by_grp, #1
+                    trl_at_fstg = trl_at_fstg, #3
+                    trl_at_subg = trl_at_subg, #4 
+                    grp_at_fstt = grp_at_fstt, #5
+                    grp_at_subt = grp_at_subt) #6
+                                   
+fam_trl_grp_by_trn <- list(trl_by_grp_by_trn = trl_by_grp_by_trn) # 2
+
+list_of_contrast_lists <- list(fam_trl_grp, 
+                               fam_trl_grp_by_trn)
+```
+
+Edit the contrasts function
+
+```{r}
+# a function to rule them all
+
+# first edit data frame to average over switch trials, because the aov_ez() 
+# function uses case wise deletion. Note: still does case wise deletion 
+# for rt_first_correct_mean and rt_subs_correct_mean because some subjects # have missing data there
+data <- avg_multi_memgrp[ses=='testing', 
+                 .(accuracy_mean=mean(accuracy_mean, na.rm=T),
+                   setting_errors_mean=mean(setting_errors_mean, na.rm=T),
+                   general_errors_mean=mean(general_errors_mean, na.rm=T),
+                   rt_first_correct_mean=mean(rt_first_correct_mean, na.rm=T),
+                   rt_subs_correct_mean=mean(rt_subs_correct_mean, na.rm=T)),
+                 by=c('train_type', 'multi_trial', 'mem_group', 'sub')]
+
+get_all_contrasts <- function(this_dv, list_of_contrast_lists){
+  
+  # specify model
+  mdl <- aov_ez(id = 'sub',
+                within = c('multi_trial', 'mem_group'), 
+                between = 'train_type',
+                dv = this_dv,
+                data = data)
+  
+  # generate means
+  emm_int <- emmeans(mdl, c('multi_trial', 'mem_group', 'train_type'))
+  
+    # plot 
+  p <- afex_plot(mdl, 
+          x = 'multi_trial', 
+          trace = 'train_type', 
+          panel = 'mem_group',
+          error = "none", 
+          data_plot = F) + 
+  theme_pubclean()
+  
+  # compute contrasts
+  c <- do.call(rbind, lapply(list_of_contrast_lists, function(x) summary(contrast(emm_int, x, adjust='bonferroni'))))
+  
+  # put result in data frame
+  dt <- data.table(c)
+  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+
+  # return output
+  return(list(means=emm_int, plot=p, contrasts=c, dt=dt))
+}
+
+
+```
+
+### Accuracy
+
+```{r}
+
+# assign variable label
+var <- 'accuracy_mean'
+
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+res$plot
+
+# save result
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
+write_csv(res$dt, fln)
+
+```
+### Setting errors
+
+```{r}
+
+# assign variable label
+var <- 'setting_errors_mean'
+
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+res$plot
+
+# save result
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
+write_csv(res$dt, fln)
+
+```
+
+### General errors
+
+```{r}
+
+# assign variable label
+var <- 'general_errors_mean'
+
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+res$plot
+
+# save result
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
+write_csv(res$dt, fln)
+
+```
+
+### RT_first_correct
+
+```{r}
+
+# assign variable label
+var <- 'rt_first_correct_mean'
+
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+res$plot
+
+# save result
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
+write_csv(res$dt, fln)
+
+```
+
+### RT subs correct
+
+```{r}
+
+# assign variable label
+var <- 'rt_subs_correct_mean'
+
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+res$plot
+
+# save result
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
+write_csv(res$dt, fln)
+
+```
+
+
 
 ## Training session
 
