@@ -331,7 +331,7 @@ Wrangle data so it's ready for analysis
 
 ```{r}
 avg_multi_melt <- melt(avg_multi_subRT[ses=='testing'], 
-       id.vars=c('sub', 'ses', 'train_type', 'multi_trial'),
+       id.vars=c('sub', 'ses', 'train_type', 'multi_trial', 'multi_cond'),
        measure.vars=c('rt_first_correct_mean',
                       'rt_subs_correct_1_mean',
                       'rt_subs_correct_2_mean',
@@ -339,7 +339,7 @@ avg_multi_melt <- melt(avg_multi_subRT[ses=='testing'],
        variable.name='door_selection',
        value.name='rt_correct_mean')
 
-avg_multi_melt <- avg_multi_melt[,.(rt_correct_mean=mean(rt_correct_mean)), by=c('sub', 'train_type', 'multi_trial', 'door_selection')]
+# avg_multi_melt <- avg_multi_melt[,.(rt_correct_mean=mean(rt_correct_mean)), by=c('sub', 'train_type', 'multi_trial', 'door_selection')]
 
 
 ```
@@ -351,32 +351,53 @@ Define new set of contrasts to compare RTs across clicks
 
 # convenience vectors
 door_slctn <- list(
-  fst_subs = rep(c(-1, 1/3, 1/3, 1/3), times=4),
-  sub1_sub2 = rep(c(0, -1, 1, 0), times=4),
-  sub1_sub3 = rep(c(0, -1, 0, 1), times=4),
-  sub2_sub3 = rep(c(0, 0, -1, 1), times=4)
+  fst_subs = rep(c(-1, 1/3, 1/3, 1/3), times=12),
+  sub1_sub2 = rep(c(0, -1, 1, 0), times=12),
+  sub1_sub3 = rep(c(0, -1, 0, 1), times=12),
+  sub2_sub3 = rep(c(0, 0, -1, 1), times=12),
+  fst = rep(c(1, 0, 0, 0), times=12)
 )
 train_type <- list(
-  int = rep(c(-1, 1), each=8)
+  int = rep(c(-1, 1), each=24)
 )
 multi_trial <- list( 
-  int = rep(c(-1, -1, -1, -1, 1, 1, 1, 1), times=2),
-  first = rep(c(1, 1, 1, 1, 0, 0, 0, 0), times=2),
-  subs = rep(c(0, 0, 0, 0, 1, 1, 1, 1), times=2)
+  int = rep(c(-1, -1, -1, -1, 1, 1, 1, 1), times=6),
+  fst = rep(c(1, 1, 1, 1, 0, 0, 0, 0), times=6),
+  subs = rep(c(0, 0, 0, 0, 1, 1, 1, 1), times=6)
+)
+multi_cond <- list(
+  none_multi = rep(rep(c(0.5, -1, 0.5), each=8), times=2),
+  none = rep(rep(c(0, 1, 0), each=8), times=2),
+  multi = rep(rep(c(1, 0, 1), each=8), times=2)
 )
 
 ## A priori contrasts
  
-# 1) Does RT differ on the first click relative to the rest?
+# 1) Does RT differ on the first click relative to the rest? (i.e., rt_first_correct vs. rt_subs_correct 1-3)
 fst_v_subs <- door_slctn$fst_subs
 
-# 2) Does #1 differ by multi_trial?
+# 2) Does #1 differ by multi_trial? (i.e., first trial vs subsequent trials)
 fst_v_subs_by_trl <- fst_v_subs*multi_trial$int
 
-# 3) Does #2 differ by train_type?
-fst_v_subs_by_trl_by_grp <- fst_v_subs_by_trl*train_type$int
+# 3) Does #2 differ by multi_cond? (i.e., none vs multi-trasking trials)
+fst_v_subs_by_trl_by_cond <- fst_v_subs_by_trl*multi_cond$none_multi
 
-# 4) Perform pairwise comparisons for subs responses, and test for interaction with multi_trial
+# 4) Does #3 differ by train_type? (ie., is there a 4-way interaction with train_type)
+fst_v_subs_by_trl_by_cond_by_grp <- fst_v_subs_by_trl_by_cond*train_type$int
+
+# 5) Is there a difference between multi-tasking conditions on the first response (i.e., rt_first_correct) 
+# on the first trial? (i.e., multi_cond = first).  
+none_v_multi_at_fst_at_fst <- multi_cond$none_multi*door_slctn$fst*multi_trial$fst
+
+# 6) Is there a difference between multi-tasking conditions on the first response (i.e., rt_first_correct) 
+# on subsequent trials? (i.e., multi_cond = subsequent).  
+none_v_multi_at_fst_at_subs <- multi_cond$none_multi*door_slctn$fst*multi_trial$subs
+
+# 7) Does RT differ on the first click relative to subsequent clicks on the first trial (i.e., mutli_trial = first)
+# when there's no multi-tasling (i.e., multi_cond = "none")
+fst_v_subs_at_fst_at_none <- door_slctn$fst_subs*multi_trial$fst*multi_cond$none
+
+# 8-13) Perform pairwise comparisons for subs responses, and test for interaction with multi_trial
 sub1_v_sub2 <- door_slctn$sub1_sub2 
 sub1_v_sub2_by_trl <- door_slctn$sub1_sub2*multi_trial$int 
 
@@ -387,10 +408,14 @@ sub2_v_sub3 <- door_slctn$sub2_sub3
 sub2_v_sub3_by_trl <- door_slctn$sub2_sub3*multi_trial$int 
 
 # now we have our key contrasts, we can check if they are orthogonal.
-n_contrasts <- 9
+n_contrasts <- 13
 all_contrasts <- matrix(c(fst_v_subs, 
                           fst_v_subs_by_trl, 
-                          fst_v_subs_by_trl_by_grp, 
+                          fst_v_subs_by_trl_by_cond,
+                          fst_v_subs_by_trl_by_cond_by_grp,
+                          none_v_multi_at_fst_at_fst,
+                          none_v_multi_at_fst_at_subs,
+                          fst_v_subs_at_fst_at_none,
                           sub1_v_sub2, 
                           sub1_v_sub2_by_trl,
                           sub1_v_sub3,
@@ -401,47 +426,53 @@ all_contrasts <- matrix(c(fst_v_subs,
                         ncol=n_contrasts)
 G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
 G # look at G
-# 1, 2, & 3  are non-orthogonal
-# 4, 6, & 8 are non-orthogonal
-# 5, 7, & 9 are non-orthogonal
+# 1, 2, 3, 4, 5, 6, & 7  are non-orthogonal
+# 8, 10, & 12 are non-orthogonal
+# 9, 11, & 13 are non-orthogonal
 
-fam_fst_v_subs <- list(fst_v_subs = fst_v_subs, # 1 
-                       fst_v_subs_by_trl = fst_v_subs_by_trl, # 2 
-                       fst_v_subs_by_trl_by_grp = fst_v_subs_by_trl_by_grp) # 3
+fam_fst_v_subs <- list(fst_v_subs = fst_v_subs, # 1
+                       fst_v_subs_by_trl = fst_v_subs_by_trl, # 2
+                       fst_v_subs_by_trl_by_cond = fst_v_subs_by_trl_by_cond, # 3
+                       fst_v_subs_by_trl_by_cond_by_grp = fst_v_subs_by_trl_by_cond_by_grp, # 4 
+                       none_v_multi_at_fst_at_fst = none_v_multi_at_fst_at_fst, # 5
+                       none_v_multi_at_fst_at_subs = none_v_multi_at_fst_at_subs, # 6
+                       fst_v_subs_at_fst_at_none = fst_v_subs_at_fst_at_none) # 7
                                     
-fam_subs <- list(sub1_v_sub2 = sub1_v_sub2, # 4
-                 sub1_v_sub3 = sub1_v_sub3, # 6
-                 sub2_v_sub3 = sub2_v_sub3) # 8
+fam_subs <- list(sub1_v_sub2 = sub1_v_sub2, # 8
+                 sub1_v_sub3 = sub1_v_sub3, # 10
+                 sub2_v_sub3 = sub2_v_sub3) # 12
 
-fam_subs_by_trl <- list(sub1_v_sub2_by_trl = sub1_v_sub2_by_trl, # 5
-                        sub1_v_sub3_by_trl = sub1_v_sub3_by_trl, # 7
-                        sub2_v_sub3_by_trl = sub2_v_sub3_by_trl) # 9
+fam_subs_by_trl <- list(sub1_v_sub2_by_trl = sub1_v_sub2_by_trl, # 11
+                        sub1_v_sub3_by_trl = sub1_v_sub3_by_trl, # 12
+                        sub2_v_sub3_by_trl = sub2_v_sub3_by_trl) # 13
 
 
 list_of_contrast_lists <- list(fam_fst_v_subs, 
                                fam_subs,
                                fam_subs_by_trl)
 ```
+
 Edit contrasts function
+
 ```{r}
 # a function to rule them all
 get_all_contrasts <- function(this_dv, list_of_contrast_lists){
   
   # specify model
   mdl <- aov_ez(id = 'sub',
-                within = c('multi_trial', 'door_selection'), 
+                within = c('multi_trial', 'multi_cond', 'door_selection'), 
                 between = 'train_type',
                 dv = this_dv,
                 data = avg_multi_melt)
   
   # generate means
-  emm_int <- emmeans(mdl, c('door_selection', 'multi_trial', 'train_type'))
+  emm_int <- emmeans(mdl, c('door_selection', 'multi_trial', 'multi_cond', 'train_type'))
   
     # plot 
   p <- afex_plot(mdl, 
           x = 'door_selection', 
-          trace = 'train_type', 
-          panel = 'multi_trial',
+          trace = 'multi_cond', 
+          panel = c('multi_trial'),
           error = "none", 
           data_plot = F) + 
   theme_pubclean() + 
@@ -478,7 +509,7 @@ res$plot
 
 # save result
 fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
-write_csv(res$contrasts, fln)
+write_csv(res$dt, fln)
 ```
 
 ## Test DVs by memory group
@@ -621,6 +652,7 @@ fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
 write_csv(res$dt, fln)
 
 ```
+
 ### Setting errors
 
 ```{r}
@@ -700,8 +732,6 @@ fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
 write_csv(res$dt, fln)
 
 ```
-
-
 
 ## Training session
 
