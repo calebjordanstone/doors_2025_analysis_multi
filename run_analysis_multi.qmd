@@ -75,7 +75,7 @@ avg_multi$multi_cond <- factor(avg_multi$multi_cond ,
                                           'other'))
 
 avg_multi_subRT[, switch := ifelse(switch==0, 'non-switch', 'switch')]
-avg_multi_subRT[, train_type := ifelse(train_type==1, 'variable', 'stable')]
+avg_multi_subRT[, train_type := ifelse(train_type==1, 'stable', 'variable')]
 avg_multi_subRT[, ses := ifelse(ses==2, 'training', 'testing')]
 avg_multi_subRT$multi_cond <- factor(avg_multi_subRT$multi_cond , 
                                             levels = c('none', 
@@ -83,7 +83,7 @@ avg_multi_subRT$multi_cond <- factor(avg_multi_subRT$multi_cond ,
                                                        'other'))
 
 avg_multi_memgrp[, switch := ifelse(switch==0, 'non-switch', 'switch')]
-avg_multi_memgrp[, train_type := ifelse(train_type==1, 'variable', 'stable')]
+avg_multi_memgrp[, train_type := ifelse(train_type==1, 'stable', 'variable')]
 avg_multi_memgrp[, ses := ifelse(ses==2, 'training', 'testing')]
 avg_multi_memgrp[, search_context := ifelse(mem_group=='frst_grp', 'switch', 'same')]
 
@@ -93,8 +93,9 @@ avg_multi_mts[, stage := ifelse(stage=='3', 'testing', 'initial')]
 setnames(avg_multi_mts, 'stage', 'ses') 
 
 evt_multi[, ses := case_when(ses==2 ~ 'training', 
-                             ses==3 ~ 'testing',
+                              ses==3 ~ 'testing',
                              .default = 'other')]
+evt_multi[, train_type := ifelse(train_type==1, 'stable', 'variable')]
 ```
 
 ## Testing session
@@ -315,7 +316,6 @@ write_csv(rbind(res$dt, res_ph$dt), fln)
 #### Make plot of Accuracy, Setting Errors and General Errors
 
 ```{r}
-
 avg_multi_gav_tst_acc <- avg_multi[ses=='testing',
                                    .(Accuracy=mean(accuracy_mean),
                                      SettingErrors=mean(setting_errors_mean),
@@ -451,7 +451,6 @@ svg('figs/fig_tst_acc.svg',
 plot(fig_tst_acc)
 dev.off()
 
-
 # show figure
 fig_tst_acc
 ```
@@ -512,7 +511,7 @@ avg_multi_subRT_melt <- melt(avg_multi_subRT[ses=='testing'],
 Define new set of contrasts to compare RTs across clicks
 
 ```{r}
-#| output: True
+#| output: False
 
 # convenience vectors
 door_slctn <- list(
@@ -1671,190 +1670,299 @@ get_TE <- function(data){
   mat_prbs <- p_st1_gs(mat, ndoors)
   TE <- H(mat_prbs)
 }
+
 # get TE scores per subject and session
-TEs <- evt_multi[ses %in% c('training', 'testing'), 
-                 .(TEs=get_TE(door)), 
-                 by=c('sub', 'ses')]
+TEs <- evt_multi[ses %in% c('training', 'testing'), # (ses=='training' & t > 320) | ses=='testing',
+                 .(TEs=get_TE(door)),
+                 by=c('sub', 'ses', 'train_type')]
+
 ```
 
-Next, look at whether TE differs between testing and training sessions. Looks like TE is higher during training:
+### TE by session
+
+```{r}
+#| output: false
+## define contrasts for analysis
+training_vs_testing_at_stable <- c(-1, 1, 0, 0)
+training_vs_testing_at_variable <- c(0, 0, -1, 1)
+stable_vs_variable_at_training <- c(-1, 0, 1, 0)
+stable_vs_variable_at_testing <- c(0, -1, 0, 1)
+interaction <- c(0.5, -0.5, -0.5, 0.5)
+training_vs_testing <- c(0.5, -0.5, 0.5, -0.5)
+
+# now we have our key contrasts, we can check if they are orthogonal.
+n_contrasts <- 6
+all_contrasts <- matrix(c(training_vs_testing_at_stable,
+                          training_vs_testing_at_variable,
+                          stable_vs_variable_at_training,
+                          stable_vs_variable_at_testing,
+                          interaction,
+                          training_vs_testing),
+                        byrow=FALSE,
+                        ncol=n_contrasts)
+
+G <- t(all_contrasts) %*% all_contrasts
+G # look at G: can't separate them, all need to be in 1 big family
+
+fam_test <- list(training_vs_testing_at_stable = training_vs_testing_at_stable, # 1
+                 training_vs_testing_at_variable = training_vs_testing_at_variable, # 2
+                 stable_vs_variable_at_training = stable_vs_variable_at_training, # 3
+                 stable_vs_variable_at_testing = stable_vs_variable_at_testing, # 4
+                 interaction = interaction, # 5
+                 training_vs_testing = training_vs_testing) # 6
+list_of_contrast_lists <- list(fam_test)
+
+```
+
+Edit the contrasts function
+
+```{r}
+get_all_contrasts <- function(this_dv, list_of_contrast_lists){
+
+  # specify model
+  mdl <- aov_ez(id = 'sub',
+                within = 'ses',
+                between = 'train_type',
+                dv = this_dv,
+                data = TEs)
+
+  # generate means
+  emm_int <- emmeans(mdl, c('ses', 'train_type'))
+  # plot
+  p <- afex_plot(mdl,
+          x = 'ses',
+          trace = 'train_type',
+          error = "none",
+          data_plot = F) +
+  theme_pubclean()
+
+  # compute contrasts
+  c <- do.call(rbind, lapply(list_of_contrast_lists, function(x) summary(contrast(emm_int, x, adjust='bonferroni'))))
+
+  # put result in data frame
+  dt <- data.table(c)
+  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+  # return output
+  return(list(means=emm_int, plot=p, contrasts=c, dt=dt))
+}
+
+```
+
+Looks like TE is higher during training:
 
 ```{r}
 # get TE descriptive statistics
 TEs[, .(meanTEs=mean(TEs),
-    seTEs=sd(TEs)/sqrt(.N)), 
-    by='ses']
+    seTEs=sd(TEs)/sqrt(.N)),
+    by=c('ses', 'train_type')]
 
-# run t-test
-(ttst_TE <- pairwise_t_test(TEs, TEs ~ ses, paired=T))
+# assign variable label
+var <- 'TEs'
 
-# save output
-dt <- data.table(ttst_TE)
-dt[, statistic := lapply(statistic, round, 2),
-][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p', 'p.adj')]
+# compute contrasts
+res <- get_all_contrasts(var, list_of_contrast_lists)
 
-# save result
-fln <- str_glue("res/ttest_exp-{exp}_TE.csv")
-write_csv(dt, fln)
-```
-
-Next, look at whether TE predicts multitasking costs. There are multiple ways you could do this - below I have used TE to predict mean setting errors, mean general errors, and mean RTs (for the first correct click):
-
-```{r}
-# look at data from the testing session and the first multitasking trial as this is where the effects were seen
-avg_multi_tst <- avg_multi[ses=='testing' & multi_trial == 'first' ]
-
-# does TE predict the number of setting errors when multi_cond == 'other'
-MeanSettingErrors <- avg_multi_tst[multi_cond=='other', 
-                                   .(MeanSettingErrors=mean(setting_errors_mean)),
-                                   by=c('sub', 'ses')]
-TEs <- merge(TEs, MeanSettingErrors, c('sub', 'ses'), all = T)
-mdl_se <- lm(MeanSettingErrors ~ TEs, data=TEs[ses=='testing'])
-
-# does TE predict the number of general errors when multi_cond == 'neither'
-MeanGeneralErrors <- avg_multi_tst[multi_cond=='neither', 
-                                   .(MeanGeneralErrors=mean(general_errors_mean)),
-                                   by=c('sub', 'ses')]
-TEs <- merge(TEs, MeanGeneralErrors, c('sub', 'ses'), all = T)
-mdl_ge <- lm(MeanGeneralErrors ~ TEs, data=TEs[ses=='testing'])
-
-# does TE predict RT on first correct clicks, averaged over the 'neither' and 'other' multi_cond, as there was no difference in RT between these two conditions
-MeanRTFirstCorrect <- avg_multi_tst[multi_cond %in% c('neither', 'other'),
-                                    .(MeanRTFirstCorrect=mean(rt_first_correct_mean)),
-                                    by=c('sub', 'ses')]
-TEs <- merge(TEs, MeanRTFirstCorrect, c('sub', 'ses'), all = T)
-mdl_rt <- lm(MeanRTFirstCorrect ~ TEs, data=TEs[ses=='testing'])
-
-# save output
-dt <- data.table(
-  DV = rep(c('setting_errors', 'general_errors', 'rt_first_correct'), each=2),
-  Effect = rep(c('Intercept', 'TE'), times=3),
-  Estimate= c(summary(mdl_se)$coefficients[, 'Estimate'], 
-              summary(mdl_ge)$coefficients[, 'Estimate'],
-              summary(mdl_rt)$coefficients[, 'Estimate']),
-  Std_Err = c(summary(mdl_se)$coefficients[, 'Std. Error'], 
-              summary(mdl_ge)$coefficients[, 'Std. Error'],
-              summary(mdl_rt)$coefficients[, 'Std. Error']),
-  t_val = c(summary(mdl_se)$coefficients[, 't value'], 
-            summary(mdl_ge)$coefficients[, 't value'],
-            summary(mdl_rt)$coefficients[, 't value']),
-  p_val = c(summary(mdl_se)$coefficients[, 'Pr(>|t|)'], 
-            summary(mdl_ge)$coefficients[, 'Pr(>|t|)'],
-            summary(mdl_rt)$coefficients[, 'Pr(>|t|)']))
-    
-dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('Estimate', 'Std_Err', 't_val')
-][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p_val')]
+# show results
+res$contrasts
+res$plot
 
 # save result
-fln <- str_glue("res/lms_exp-{exp}_TE.csv")
-write_csv(dt, fln)
+fln <- str_glue("res/contrasts_exp-{exp}_{var}.csv")
+write_csv(res$dt, fln)
+
+# # run t-test
+# (ttst_TE <- pairwise_t_test(TEs, TEs ~ ses, paired=T))
+# mdl_TE <- lmer(TEs ~ ses*train_type + (1|sub), data=TEs)
+# 
+# # save output
+# dt <- data.table(ttst_TE)
+# dt[, statistic := lapply(statistic, round, 2),
+# ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p', 'p.adj')]
+# 
+# # save result
+# fln <- str_glue("res/ttest_exp-{exp}_TE.csv")
+# write_csv(dt, fln)
+
 ```
 
-No effect for Setting Errors:
+#### Plot the TE scores per group by session
+
 ```{r}
-summary(mdl_se)$coefficients
-```
-Significant effect for General Errors:
-```{r}
-summary(mdl_ge)$coefficients
-```
-No effect for RT
-```{r}
-summary(mdl_rt)$coefficients
+TEs_gav <- TEs[, 
+               .(gavTE=mean(TEs)),
+               by=c('train_type', 'ses')]
+
+plot_TEs <- ggplot() +
+  
+  geom_point(data=TEs,
+             aes(x=fct_rev(ses),
+                 y=TEs,
+                 color=train_type),
+             alpha=0.3,
+             position=position_jitterdodge(jitter.width = 0.1,
+                                           dodge.width = 0.5)) +
+  geom_line(data=TEs_gav,
+            aes(x=fct_rev(ses), 
+                y=gavTE, 
+                color=train_type,
+                group=train_type),
+            linetype=2, 
+            position=position_dodge(width = 0.5)) +
+  geom_point(data=TEs_gav,
+             aes(x=fct_rev(ses), 
+                 y=gavTE, 
+                 color=train_type),
+             fill='white',
+             alpha=1,
+             size=3,
+             stroke=1.25,
+             shape=23,
+             position=position_dodge(width = 0.5)) +
+  
+  # customise
+  scale_color_tableau() +
+  scale_y_continuous(name='Transition Entropy',
+                     breaks=c(0, 5, 10, 15, 20),
+                     labels=c('0', '5', '10', '15', '20')) +
+  scale_x_discrete(name='Session',
+                   labels=c('Training', 'Testing')) +
+  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 20)),
+                  aes(x, y), size=1, color='black') +
+  my_theme() 
+
+svg('figs/fig_TE.svg',
+    width=3, height=3)
+plot(plot_TEs)
+dev.off()
+
+# show plot
+plot_TEs
+
 ```
 
-Another way of looking at the relationship between TE and multitasking costs is to look at difference scores for those same DVs. Below I look at whether TE predicts the difference in setting errors between the 'other' and 'none' conditions, the difference in general errors between the 'neither' and 'none' conditions, and the difference in RT between the average of the 'other' and 'neither' conditions and the 'none' condition:
+### TE and multitasking costs
+
+Now look at the relationship between TE and multitasking costs. Below I look at whether TE from training predicts the difference in setting errors between the 'other' and 'none' conditions, the difference in general errors between the 'neither' and 'none' conditions, and the difference in RT between the average of the 'other' and 'neither' conditions and the 'none' condition, for both the 'first' and 'subsequent' multitasking trials. I also look at the difference in multitasking costs between the first and subsequent sessions.
+
 ```{r}
+
 # put data in wide format first
-avg_multi_tst_wide <- dcast(avg_multi_tst, 
-                            sub + ses + switch ~ multi_cond,
+avg_multi_tst_wide <- dcast(avg_multi[ses=='testing'],
+                            sub + ses + switch ~ multi_cond + multi_trial,
                             value.var = c('setting_errors_mean',
                                           'general_errors_mean',
                                           'rt_first_correct_mean'))
+
 # create difference scores
-avg_multi_tst_diff <- avg_multi_tst_wide[, 
-              .(set_err_diff = setting_errors_mean_other - setting_errors_mean_none,
-                gen_err_diff = general_errors_mean_neither - general_errors_mean_none,
-                rt_first_cor_diff = ((rt_first_correct_mean_other + rt_first_correct_mean_neither)/2) -  rt_first_correct_mean_none), 
+avg_multi_tst_diff <- avg_multi_tst_wide[,
+              .(set_err_diff_first = setting_errors_mean_other_first - setting_errors_mean_none_first,
+                gen_err_diff_first = general_errors_mean_neither_first - general_errors_mean_none_first,
+                rt_first_cor_diff_first = ((rt_first_correct_mean_other_first + rt_first_correct_mean_neither_first)/2) -  rt_first_correct_mean_none_first,
+              set_err_diff_subsequent = setting_errors_mean_other_subsequent - setting_errors_mean_none_subsequent,
+               gen_err_diff_subsequent = general_errors_mean_neither_subsequent - general_errors_mean_none_subsequent,
+              rt_first_cor_diff_subsequent = ((rt_first_correct_mean_other_subsequent + rt_first_correct_mean_neither_subsequent)/2) -  rt_first_correct_mean_none_subsequent),
               by=c('sub', 'ses')]
 
+avg_multi_tst_diff[, ':=' 
+                   (set_err_diff = set_err_diff_first - set_err_diff_subsequent,
+                    gen_err_diff = gen_err_diff_first - gen_err_diff_subsequent,
+                    rt_first_cor_diff = rt_first_cor_diff_first - rt_first_cor_diff_subsequent)]
+             
+
 # merge data frames
-TEs <- merge(TEs, avg_multi_tst_diff, c('sub', 'ses'), all = T)
+# TEs <- merge(TEs, avg_multi_tst_diff, c('sub', 'ses'), all = T)
+TEs <- TEs[avg_multi_tst_diff, on='sub']
 
 # run models
-mdl_se_diff <- lm(set_err_diff ~ TEs, data=TEs[ses=='testing'])
-mdl_ge_diff <- lm(gen_err_diff ~ TEs, data=TEs[ses=='testing'])
-mdl_rt_diff <- lm(rt_first_cor_diff ~ TEs, data=TEs[ses=='testing'])
+mdl_se_diff_fst <- lm(set_err_diff_first ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_ge_diff_fst <- lm(gen_err_diff_first ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_rt_diff_fst <- lm(rt_first_cor_diff_first ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_se_diff_sub <- lm(set_err_diff_subsequent ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_ge_diff_sub <- lm(gen_err_diff_subsequent ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_rt_diff_sub <- lm(rt_first_cor_diff_subsequent ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_se_diff <- lm(set_err_diff ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_ge_diff <- lm(gen_err_diff ~ TEs:train_type, data=TEs[ses=='training'])
+mdl_rt_diff <- lm(rt_first_cor_diff ~ TEs:train_type, data=TEs[ses=='training'])
 
-# save output
-dt <- data.table(
-  DV = rep(c('setting_errors', 'general_errors', 'rt_first_correct'), each=2),
-  Effect = rep(c('Intercept', 'TE'), times=3),
-  Estimate= c(summary(mdl_se_diff)$coefficients[, 'Estimate'], 
-              summary(mdl_ge_diff)$coefficients[, 'Estimate'],
-              summary(mdl_rt_diff)$coefficients[, 'Estimate']),
-  Std_Err = c(summary(mdl_se_diff)$coefficients[, 'Std. Error'], 
-              summary(mdl_ge_diff)$coefficients[, 'Std. Error'],
-              summary(mdl_rt_diff)$coefficients[, 'Std. Error']),
-  t_val = c(summary(mdl_se_diff)$coefficients[, 't value'], 
-            summary(mdl_ge_diff)$coefficients[, 't value'],
-            summary(mdl_rt_diff)$coefficients[, 't value']),
-  p_val = c(summary(mdl_se_diff)$coefficients[, 'Pr(>|t|)'], 
-            summary(mdl_ge_diff)$coefficients[, 'Pr(>|t|)'],
-            summary(mdl_rt_diff)$coefficients[, 'Pr(>|t|)']))
-    
-dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('Estimate', 'Std_Err', 't_val')
-][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p_val')]
+models <- list(mdl_se_diff_fst, mdl_ge_diff_fst, mdl_rt_diff_fst,
+               mdl_se_diff_sub, mdl_ge_diff_sub, mdl_rt_diff_sub,
+               mdl_se_diff, mdl_ge_diff, mdl_rt_diff)
+
+dt <- data.table()
+for (model in models) {
+  d <- data.frame(summary(model)$coefficients, DV = paste(model$call$formula[[2]]))
+  dt <- rbind(dt, d)
+}
+dt$Effect <- rep(c('Intercept', 'Stable', 'Variable'), times = 9)
+dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('Estimate', 'Std..Error', 't.value')
+  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('Pr...t..')]
 
 # save result
 fln <- str_glue("res/lms_exp-{exp}_TE_diff.csv")
 write_csv(dt, fln)
 ```
 
-Again, no effect on Setting Errors
+The above analysis produces 1 significant result: An effect in the Stable group for RT First Correct on subsequent multitasking trials. However, the p-value is only 0.025, so wouldn't survive correction for the 9 different models that I ran.
+
 ```{r}
-summary(mdl_se_diff)$coefficients
+
+summary(mdl_rt_diff_sub)$coefficients
+
+ggplot(data=TEs[ses=='training'], aes(x=TEs, y=rt_first_cor_diff_subsequent, color=train_type)) + 
+  geom_point() + 
+  geom_smooth(se=F, method='lm')
+
 ```
 
-But a significant effect on General Errors
-```{r}
-summary(mdl_ge_diff)$coefficients
-```
-And no effect on RTs
-```{r}
-summary(mdl_rt_diff)$coefficients
-```
+### TE and mindfulness
 
 Lastly, look at whether TE is associated with mindfulness:
 
 ```{r}
-# add mindfulness data 
+
+# add mindfulness data
 TEs <- TEs[svy_multi[, .(sub, total_wout_observing)], on='sub']
+TEs$total_wout_observing_z <- scale(TEs$total_wout_observing)
+
 # run correlation for training session
-cor_ffmq_trn <- cor_test(TEs[ses=='training',], TEs, total_wout_observing)
+mdl_ffmq_trn <- lm(TEs ~ total_wout_observing_z:train_type, data=TEs[ses=='training'])
+
 # run correlation for testing session
-cor_ffmq_tst <- cor_test(TEs[ses=='testing',], TEs, total_wout_observing)
+mdl_ffmq_tst <- lm(TEs ~ total_wout_observing_z:train_type, data=TEs[ses=='testing'])
 
 # create data table of results
-dt_trn <- data.table(cor_ffmq_trn)
-dt_tst <- data.table(cor_ffmq_tst)
-dt <- rbind(dt_trn, dt_tst)
-dt$ses <- c('training', 'testing')
-dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('cor', 'statistic', 'conf.low', 'conf.high')
-][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p')]
+
+dt <- data.table(
+  ses = rep(c('train', 'test'), each=2),
+  effect = rep(c('FFMQ_stable', 'FFMQ_variable'), times=2),
+  Estimate = c(summary(mdl_ffmq_trn)$coefficients[2:3, 'Estimate'],
+               summary(mdl_ffmq_tst)$coefficients[2:3, 'Estimate']),
+  Std_Error = c(summary(mdl_ffmq_trn)$coefficients[2:3, 'Std. Error'],
+                summary(mdl_ffmq_tst)$coefficients[2:3, 'Std. Error']),
+  t_val = c(summary(mdl_ffmq_trn)$coefficients[2:3, 't value'],
+            summary(mdl_ffmq_tst)$coefficients[2:3, 't value']),
+  p_val = c(summary(mdl_ffmq_trn)$coefficients[2:3, 'Pr(>|t|)'],
+            summary(mdl_ffmq_tst)$coefficients[2:3, 'Pr(>|t|)'])
+)
 
 # save result
-fln <- str_glue("res/cors_exp-{exp}_TE.csv")
+fln <- str_glue("res/lms_exp-{exp}_TE_FFMQ.csv")
 write_csv(dt, fln)
 ```
 
-No association during the training session:
+No association between mindfulness and TE for either training group during the training session:
+
 ```{r}
-cor_ffmq_trn
+
+summary(mdl_ffmq_trn)$coefficients 
+
 ```
+
 And no association during the testing session:
+
 ```{r}
-cor_ffmq_tst
+
+summary(mdl_ffmq_tst)$coefficients 
+
 ```
-
-
