@@ -52,6 +52,7 @@ library(tidyverse)
 library(stringr)
 library(cowplot)
 library(ggthemes)
+library(PsyR)
 source(file.path("my_theme.R"))
 source(file.path("ent_functions.R"))
 
@@ -69,6 +70,7 @@ avg_multi_memgrp_subRT <- fread('data/exp-multi_avg_by_memgrp_by_subRT.csv', str
 avg_multi_mts <- fread('data/exp-multi_mts_avg.csv')
 evt_multi <- fread('data/exp-multi_evt.csv')
 svy_multi <- fread('data/exp-multi_svy.csv')
+evt_multi_nds <- fread('data/exp-multi_neither_door_selections.csv')
 
 # change factor level names
 avg_multi[, switch := ifelse(switch==0, 'non-switch', 'switch')]
@@ -101,6 +103,11 @@ evt_multi[, ses := case_when(ses==2 ~ 'training',
                               ses==3 ~ 'testing',
                              .default = 'other')]
 evt_multi[, train_type := ifelse(train_type==1, 'stable', 'variable')]
+
+evt_multi_nds[, switch := ifelse(switch==0, 'non-switch', 'switch')]
+evt_multi_nds[, train_type := ifelse(train_type==1,'stable', 'variable')]
+evt_multi_nds[, ses := ifelse(ses==2, 'training', 'testing')]
+
 ```
 
 ## Testing session
@@ -108,7 +115,7 @@ evt_multi[, train_type := ifelse(train_type==1, 'stable', 'variable')]
 Define contrasts.
 
 ```{r}
-#| output: false
+#| output: true
 
 # assign session label
 ses <- 'test'
@@ -117,6 +124,7 @@ ses <- 'test'
 multi_cond <- list(
   neither_other = rep(c(0, 1, -1), times=4),
   none_other = rep(c(1, 0, -1), times=4),
+  none_neither = rep(c(1, -1, 0), times=4),
   none_multi = rep(c(1, -0.5, -0.5), times=4)
 )
 train_type = list(
@@ -128,61 +136,51 @@ multi_trial = list(
 )
 
 ## A priori contrasts
+
+# 1) Is there an effect of multitasking 
+none_v_multi <- multi_cond$none_multi
+
+# 2) Does the multitasking effect differ by trial
+none_v_multi_by_trl <- none_v_multi*multi_trial$int
  
-# 1) Is performance worse on the neither/other (multi) trials compared to the none trials, for the first of the search trials?
-none_v_multi_at_fst <- multi_cond$none_multi*multi_trial$first
+# 3) Is there task-specific interference
+neither_v_other <- multi_cond$neither_other
 
-# 2) Is the difference between neither/other trials vs none trials different for first compared to subsequent search trials? 
-none_v_multi_by_trl <- multi_cond$none_multi*multi_trial$int
+# 5) Does the task-specific interference depend on trial 
+neither_v_other_by_trl <- neither_v_other*multi_trial$int
 
-# 3) Is the effect of trial on the none vs. multi comparison reduced for the variable group compared to the stable group?
-none_v_multi_by_trl_by_grp <- none_v_multi_by_trl*train_type$int
-
-# 4) Is performance worse on other trials than neither trials, for the first of the search trials?
-neither_v_other_at_fst <- multi_cond$neither_other*multi_trial$first
-
-# 5) Is the difference between other vs neither trials greater for the variable group compared to the stable group?
-neither_v_other_at_fst_by_grp <- multi_cond$neither_other*multi_trial$first*train_type$int
-
-# 6) Is the difference between neither and other different for first compared to subsequent search trials?
-neither_v_other_by_trl <- multi_cond$neither_other*multi_trial$int
-
-# 7) Is the effect of trial on the neither vs. other comparison reduced for the variable group compared to the stable group?
+# 4) Does the task-specific interference depend on trial and train type
 neither_v_other_by_trl_by_grp <- neither_v_other_by_trl*train_type$int
 
 # now we have our key contrasts, we can check if they are orthogonal.
-n_contrasts <- 7
-all_contrasts <- matrix(c(none_v_multi_at_fst, 
+n_contrasts <- 5
+all_contrasts <- matrix(c(none_v_multi,
                           none_v_multi_by_trl, 
-                          none_v_multi_by_trl_by_grp, 
-                          neither_v_other_at_fst, 
-                          neither_v_other_at_fst_by_grp, 
+                          neither_v_other, 
                           neither_v_other_by_trl,
                           neither_v_other_by_trl_by_grp), 
                         byrow=FALSE, 
                         ncol=n_contrasts)
 G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
-G # look at G
-# 1 & 2, 4 & 6, 5 & 7 are non-orthogonal
-# Bonferroni adjustment needs to be applied to the pairs of non-orthogonal contrasts. The rest are independent to the others so can each be tested at p<.05. 
-# Define the families now
-fam_none_v_multi <- list(none_v_multi_at_fst = none_v_multi_at_fst, # 1
-                         none_v_multi_by_trl = none_v_multi_by_trl) # 2
-                                   
-fam_none_v_multi_by_grp <- list(none_v_multi_by_trl_by_grp = none_v_multi_by_trl_by_grp) # 3
+#G # look at G: all are orthogonal
 
-fam_neither_vs_other <- list(neither_v_other_at_fst = neither_v_other_at_fst, # 4
-                             neither_v_other_by_trl = neither_v_other_by_trl) # 6
+# Define the families now. 
+fam_none_v_multi <- list(none_v_multi = none_v_multi)
 
-fam_neither_vs_other_by_grp <- list(neither_v_other_at_fst_by_grp = neither_v_other_at_fst_by_grp, # 5
-                                    neither_v_other_by_trl_by_grp = neither_v_other_by_trl_by_grp) # 7
+fam_none_v_multi_by_trl <- list(none_v_multi_by_trl = none_v_multi_by_trl)
 
-# Note that any tests beyond this point will be post-hoc simple effect comparisons, will be non-orthognal. After each of the above contrast tests, we should determine any post-hoc tests we want to do, which will determine how we control for them.
+fam_neither_v_other <- list(neither_v_other = neither_v_other)
 
-list_of_contrast_lists <- list(fam_none_v_multi, 
-                               fam_none_v_multi_by_grp, 
-                               fam_neither_vs_other, 
-                               fam_neither_vs_other_by_grp)
+fam_neither_v_other_by_trl <- list(neither_v_other_by_trl = neither_v_other_by_trl)
+
+fam_neither_v_other_by_trl_by_grp <- list(neither_v_other_by_trl_by_grp = neither_v_other_by_trl_by_grp)
+
+
+list_of_contrast_lists <- list(fam_none_v_multi,
+                               fam_none_v_multi_by_trl,
+                               fam_neither_v_other,
+                               fam_neither_v_other_by_trl,
+                               fam_neither_v_other_by_trl_by_grp)
 ```
 
 Write function to apply contrasts to emmeans table.
@@ -264,45 +262,37 @@ var <- 'general_errors_mean'
 # compute contrasts
 res <- get_all_contrasts(var, list_of_contrast_lists)
 
+fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
+write_csv(res$dt, fln)
+
 # show results
 res$contrasts
 ```
 
-Run post-hoc tests to test for a non-significant difference between "none" and "other" trials.
+Do general errors come from the WMT locations?
 
 ```{r}
 
-# 1) From the plot above, the difference between 'none' vs 'multi' appears to be driven by the difference between 'neither' vs 'none' trails. Here we test for non-sig difference between 'none' vs 'other' trials
-none_v_other_at_fst <- multi_cond$none_other*multi_trial$first
+pcent_neutral_errors <- evt_multi_nds[, .(NeutralErrors = sum(door_in_wmt_locs)/.N), by=c('sub', 'train_type')]
 
-# 2) Then we repeat the above analysis with the group interaction
-none_v_other_at_fst_by_grp <- none_v_other_at_fst*train_type$int
+av_neutralDoorSelections <- pcent_neutral_errors[, mean(NeutralErrors)]
 
-# Check if contrasts are orthogonal
-n_contrasts <- 2
-all_contrasts <- matrix(c(none_v_other_at_fst,
-                          none_v_other_at_fst_by_grp),
-                        byrow=FALSE,
-                        ncol=n_contrasts)
-G <- t(all_contrasts) %*% all_contrasts
-#G # look at G - all are orthogonal
-fam_none_v_other <- list(none_v_other_at_fst = none_v_other_at_fst) # 1
+print(paste0("Average proportion of general errors from WMT locations (i.e., neutral doors): ",
+             round(av_neutralDoorSelections, 3)))
 
-fam_none_v_other_by_grp <- list(none_v_other_at_fst_by_grp = none_v_other_at_fst_by_grp) # 2
-
-list_of_posthoc_contrast_lists <- list(fam_none_v_other,
-                                       fam_none_v_other_by_grp)
+ggplot() + 
+  geom_histogram(data=pcent_neutral_errors, 
+            aes(x=NeutralErrors),
+            bins=10,
+            fill='#7fc1ab') + 
+  xlab('Proportion of general errors from WMT locations') +
+  scale_y_continuous(name='Count',
+                     breaks=c(0, 5, 10, 15, 20)) + 
+  geom_rangeframe(data=data.frame(x=c(0, 1), y=c(0, 20)),
+                  aes(x, y), size=1, color='black') +
+  my_theme() 
 
 
-# compute post-hoc contrasts
-res_ph <- get_all_contrasts(var, list_of_posthoc_contrast_lists)
-
-# save results
-fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
-write_csv(rbind(res$dt, res_ph$dt), fln)
-
-# show results
-res_ph$contrasts
 ```
 
 #### Plot Setting Errors and General Errors
@@ -400,13 +390,14 @@ fig_tst_err <- plot_grid(#plot_tst_acc,
                          rel_heights=c(1, 1),
                          align="v")
 
-svg('figs/fig_tst_err.svg',
-    width=5, height=6)
-plot(fig_tst_err)
-dev.off()
+# svg('figs/fig_tst_err.svg',
+#     width=5, height=6)
+# plot(fig_tst_err)
+# dev.off()
 ```
 
 Show final figure.
+
 ```{r}
 include_graphics("figs/fig_tst_err_final.png") 
 
@@ -459,119 +450,103 @@ avg_multi_subRT_melt <- melt(avg_multi_subRT[ses=='testing'],
        value.name='rt_correct_mean')
 ```
 
-Define new set of contrasts to compare RTs across clicks.
+Define new set of contrasts to compare RTs across clicks
 
 ```{r}
 #| output: False
 
 # convenience vectors
 door_slctn <- list(
-  fst_subs = rep(c(-1, 1/3, 1/3, 1/3), times=12),
-  sub1_sub2 = rep(c(0, -1, 1, 0), times=12),
-  sub1_sub3 = rep(c(0, -1, 0, 1), times=12),
-  sub2_sub3 = rep(c(0, 0, -1, 1), times=12),
-  fst = rep(c(1, 0, 0, 0), times=12)
+  fst_subs = rep(c(-3, 1, 1, 1), times=12)
 )
 train_type <- list(
   int = rep(c(-1, 1), each=24)
 )
 multi_trial <- list( 
-  int = rep(c(-1, -1, -1, -1, 1, 1, 1, 1), times=6),
-  fst = rep(c(1, 1, 1, 1, 0, 0, 0, 0), times=6),
-  subs = rep(c(0, 0, 0, 0, 1, 1, 1, 1), times=6)
+  int = rep(c(-1, -1, -1, -1, 1, 1, 1, 1), times=6)
 )
 multi_cond <- list(
   none_multi = rep(rep(c(-1, 0.5, 0.5), each=8), times=2),
-  none = rep(rep(c(1, 0, 0), each=8), times=2),
-  multi = rep(rep(c(0, 1, 1), each=8), times=2)
+  none_other = rep(rep(c(1, 0, -1), each=8), times=2),
+  none_neither = rep(rep(c(1, -1, 0), each=8), times=2)
 )
+
 
 ## A priori contrasts
  
-# 1) Does RT differ on the first click relative to the rest? (i.e., rt_first_correct vs. rt_subs_correct 1-3)
-fst_v_subs <- door_slctn$fst_subs
+# 1) Is there a multitasking cost?
+none_v_multi <- multi_cond$none_multi
 
-# 2) Does #1 differ by multi_trial? (i.e., first trial vs subsequent trials)
-fst_v_subs_by_trl <- fst_v_subs*multi_trial$int
+# 2) Is #1 specific to the first trial
+none_v_multi_by_trl <- none_v_multi*multi_trial$int
 
-# 3) Does #2 differ by multi_cond? (i.e., none vs multi-trasking trials)
-fst_v_subs_by_trl_by_cond <- fst_v_subs_by_trl*multi_cond$none_multi
+# 3) Is #1 specific to the first click you make
+none_v_multi_by_clk <- none_v_multi*door_slctn$fst_subs
 
-# 4) Does #3 differ by train_type? (ie., is there a 4-way interaction with train_type)
-fst_v_subs_by_trl_by_cond_by_grp <- fst_v_subs_by_trl_by_cond*train_type$int
+# 4) Is #1 specific to the first click you make on the first trial
+none_v_multi_by_trl_by_clk <- none_v_multi_by_clk*multi_trial$int
 
-# 5) Is there a difference between multi-tasking conditions on the first response (i.e., rt_first_correct) 
-# on the first trial? (i.e., multi_cond = first).  
-none_v_multi_at_fst_at_fst <- multi_cond$none_multi*door_slctn$fst*multi_trial$fst
+# 5) Is the multitasking cost subject to task-specific interference
+neither_v_other <- multi_cond$none_other - multi_cond$none_neither
 
-# 6) Is there a difference between multi-tasking conditions on the first response (i.e., rt_first_correct) 
-# on subsequent trials? (i.e., multi_cond = subsequent).  
-none_v_multi_at_fst_at_subs <- multi_cond$none_multi*door_slctn$fst*multi_trial$subs
+# 6) Is #5 specific to the first trial
+neither_v_other_by_trl <- neither_v_other*multi_trial$int
 
-# 7) Does RT differ on the first click relative to subsequent clicks on the first trial (i.e., mutli_trial = first)
-# when there's no multi-tasling (i.e., multi_cond = "none")
-fst_v_subs_at_fst_at_none <- door_slctn$fst_subs*multi_trial$fst*multi_cond$none
+# 7) Is #5 specific to the first click you make
+neither_v_other_by_clk <- neither_v_other*door_slctn$fst_subs
 
-# 8-13) Perform pairwise comparisons for subs responses, and test for interaction with multi_trial
-sub1_v_sub2 <- door_slctn$sub1_sub2 
-sub1_v_sub2_by_trl <- door_slctn$sub1_sub2*multi_trial$int 
+# 8) Is #5 specific to the first click you make on the first trial
+neither_v_other_by_trl_by_clk <- neither_v_other_by_clk*multi_trial$int
 
-sub1_v_sub3 <- door_slctn$sub1_sub3
-sub1_v_sub3_by_trl <- door_slctn$sub1_sub3*multi_trial$int 
-
-sub2_v_sub3 <- door_slctn$sub2_sub3
-sub2_v_sub3_by_trl <- door_slctn$sub2_sub3*multi_trial$int 
+# 9) Is #8 dependent on train type
+neither_v_other_by_trl_by_clk_by_grp <- neither_v_other_by_trl_by_clk*train_type$int
 
 # now we have our key contrasts, we can check if they are orthogonal.
-n_contrasts <- 13
-all_contrasts <- matrix(c(fst_v_subs, 
-                          fst_v_subs_by_trl, 
-                          fst_v_subs_by_trl_by_cond,
-                          fst_v_subs_by_trl_by_cond_by_grp,
-                          none_v_multi_at_fst_at_fst,
-                          none_v_multi_at_fst_at_subs,
-                          fst_v_subs_at_fst_at_none,
-                          sub1_v_sub2, 
-                          sub1_v_sub2_by_trl,
-                          sub1_v_sub3,
-                          sub1_v_sub3_by_trl,
-                          sub2_v_sub3,
-                          sub2_v_sub3_by_trl), 
+n_contrasts <- 9
+all_contrasts <- matrix(c(none_v_multi, 
+                          none_v_multi_by_trl,
+                          none_v_multi_by_clk, 
+                          none_v_multi_by_trl_by_clk,
+                          neither_v_other,
+                          neither_v_other_by_trl,
+                          neither_v_other_by_clk,
+                          neither_v_other_by_trl_by_clk,
+                          neither_v_other_by_trl_by_clk_by_grp), 
                         byrow=FALSE, 
                         ncol=n_contrasts)
 G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
-G # look at G
-# 1, 2, 3, 4, 5, 6, & 7  are non-orthogonal
-# 8, 10, & 12 are non-orthogonal
-# 9, 11, & 13 are non-orthogonal
+#G # look at G: again, all are orthogonal
 
-fam_fst_v_subs <- list(fst_v_subs = fst_v_subs, # 1
-                       fst_v_subs_by_trl = fst_v_subs_by_trl, # 2
-                       fst_v_subs_by_trl_by_cond = fst_v_subs_by_trl_by_cond, # 3
-                       fst_v_subs_by_trl_by_cond_by_grp = fst_v_subs_by_trl_by_cond_by_grp, # 4 
-                       none_v_multi_at_fst_at_fst = none_v_multi_at_fst_at_fst, # 5
-                       none_v_multi_at_fst_at_subs = none_v_multi_at_fst_at_subs, # 6
-                       fst_v_subs_at_fst_at_none = fst_v_subs_at_fst_at_none) # 7
-                                    
-fam_subs <- list(sub1_v_sub2 = sub1_v_sub2, # 8
-                 sub1_v_sub3 = sub1_v_sub3, # 10
-                 sub2_v_sub3 = sub2_v_sub3) # 12
+fam_none_v_multi <- list(none_v_multi = none_v_multi)
+fam_none_v_multi_by_trl <- list(none_v_multi_by_trl = none_v_multi_by_trl)
+fam_none_v_multi_by_clk <- list(none_v_multi_by_clk = none_v_multi_by_clk)
+fam_none_v_multi_by_trl_by_clk <- list(none_v_multi_by_trl_by_clk = none_v_multi_by_trl_by_clk)
+neither_v_other <- list(neither_v_other = neither_v_other)
+neither_v_other_by_trl <- list(neither_v_other_by_trl = neither_v_other_by_trl)
+neither_v_other_by_clk <- list(neither_v_other_by_clk = neither_v_other_by_clk)
+neither_v_other_by_trl_by_clk <- list(neither_v_other_by_trl_by_clk = neither_v_other_by_trl_by_clk)
+neither_v_other_by_trl_by_clk_by_grp <- list(neither_v_other_by_trl_by_clk_by_grp = neither_v_other_by_trl_by_clk_by_grp)
 
-fam_subs_by_trl <- list(sub1_v_sub2_by_trl = sub1_v_sub2_by_trl, # 11
-                        sub1_v_sub3_by_trl = sub1_v_sub3_by_trl, # 12
-                        sub2_v_sub3_by_trl = sub2_v_sub3_by_trl) # 13
+# make two master lists, one with within-subject effects and one with mixed efects
+list_of_contrast_lists_w <- list(fam_none_v_multi,
+                                 fam_none_v_multi_by_trl,
+                                 fam_none_v_multi_by_clk,
+                                 fam_none_v_multi_by_trl_by_clk,
+                                 neither_v_other,
+                                 neither_v_other_by_trl,
+                                 neither_v_other_by_clk,
+                                 neither_v_other_by_trl_by_clk)
 
-
-list_of_contrast_lists <- list(fam_fst_v_subs, 
-                               fam_subs,
-                               fam_subs_by_trl)
+list_of_contrast_lists_bw <- list(neither_v_other_by_trl_by_clk_by_grp)
 ```
 
 Edit contrasts function.
 
 ```{r}
 # a function to rule them all
-get_all_contrasts <- function(this_dv, list_of_contrast_lists){
+get_all_contrasts <- function(this_dv, 
+                              list_of_contrast_lists_w,
+                              list_of_contrast_lists_bw){
   
   # specify model
   mdl <- aov_ez(id = 'sub',
@@ -595,16 +570,27 @@ get_all_contrasts <- function(this_dv, list_of_contrast_lists){
                                    vjust = 0.5, 
                                    hjust=1))
   
-  # compute contrasts
-  c <- do.call(rbind, lapply(list_of_contrast_lists, function(x) summary(contrast(emm_int, x, adjust='bonferroni'))))
+  ## compute contrasts - need to do this separately for the within and mixed effects 
+  
+  # c <- do.call(rbind, lapply(list_of_contrast_lists, function(x) contrast(emm_int, x)))
+  
+  con_w <- contrast(emm_int, list_of_contrast_lists_w)
+  con_bw <- contrast(emm_int, list_of_contrast_lists_bw)
+  
+  # call PsyR function 
+  out <- psyci(
+    model = mdl,
+    contrast_tables = list(con_w, con_bw),
+    method = "ph")
+  
   
   # put result in data frame
-  dt <- data.table(c)
-  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
-  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+  dt <- rbind(data.table(out[[1]]), data.table(out[[2]]), fill=T) # output in dependent-variable units
+  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df_num', 'df_error', 'F_value', 'cc', 'lower', 'upper', 'theta')
+  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p_value', 'p_value_adjusted')]
 
   # return output
-  return(list(means=emm_int, plot=p, contrasts=c, dt=dt))
+  return(list(means=emm_int, plot=p, contrasts=list(con_w, con_bw), dt=dt))
 }
 
 
@@ -616,14 +602,14 @@ Run analysis and save output.
 var <- 'rt_correct_mean'
 
 # compute contrasts
-res <- get_all_contrasts(var, list_of_contrast_lists)
+res <- get_all_contrasts(var, list_of_contrast_lists_w, list_of_contrast_lists_bw)
 
 # save result
 fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}.csv")
 write_csv(res$dt, fln)
 
 # show results
-res$contrasts
+print(res$dt)
 ```
 
 #### Plot RT all
@@ -676,13 +662,14 @@ plot_tst_rt <- ggplot() +
   my_theme() + theme(legend.position = c(0.8, 0.8))
 
 
-svg('figs/fig_tst_rt.svg',
-    width=8, height=4.5)
-plot(plot_tst_rt)
-dev.off()
+# svg('figs/fig_tst_rt.svg',
+#     width=8, height=4.5)
+# plot(plot_tst_rt)
+# dev.off()
 ```
 
 Show final figure.
+
 ```{r}
 include_graphics("figs/fig_tst_rt_final.png") 
 ```
@@ -700,9 +687,7 @@ search_cntxt = list(
   switch = rep(c(1, 1, 0, 0), times=2),
   same = rep(c(0, 0, 1, 1), times=2)
 )
-train_type = list(
-  int = rep(c(-1, 1), each=4)
-)
+
 multi_trial = list( 
   int = rep(c(-1, 1), times=4),
   first = rep(c(1, 0), times=4),
@@ -710,30 +695,26 @@ multi_trial = list(
 )
 
 ## A priori contrasts
- 
+
 # 1) Does the effect of multi_trial differ by search context?
 trl_by_cntxt <- multi_trial$int*search_cntxt$int
 
-# 2) Does this differ by train_type (3-way interaction)
-trl_by_cntxt_by_trn <- multi_trial$int*search_cntxt$int*train_type$int
-
-# 3) Compare first to subsequent trials for "switch" search context trials
+# 2) Compare first to subsequent trials for "switch" search context trials
 trl_at_switch <- multi_trial$int*search_cntxt$switch
 
-# 4) Compare first to subsequent trials for "same" search context trials
+# 3) Compare first to subsequent trials for "same" search context trials
 trl_at_same <- multi_trial$int*search_cntxt$same
 
-# 5) Compare "switch" to "same" search context trials for "first" multi_trial
+# 4) Compare "switch" to "same" search context trials for "first" multi_trial
 cntxt_at_fstt <- search_cntxt$int*multi_trial$first
 
-# 6) Compare "switch" to "same" search context trials for "subs" multi_trial
+# 5) Compare "switch" to "same" search context trials for "subs" multi_trial
 cntxt_at_subt <- search_cntxt$int*multi_trial$subs
 
 
 # now we have our key contrasts, we can check if they are orthogonal.
-n_contrasts <- 6
+n_contrasts <- 5
 all_contrasts <- matrix(c(trl_by_cntxt, 
-                          trl_by_cntxt_by_trn, 
                           trl_at_switch, 
                           trl_at_same, 
                           cntxt_at_fstt, 
@@ -741,19 +722,16 @@ all_contrasts <- matrix(c(trl_by_cntxt,
                         byrow=FALSE, 
                         ncol=n_contrasts)
 G <- t(all_contrasts) %*% all_contrasts # compute the gram matrix (i.e. the dot product between all pairs of vectors). If the vectors are all orthogonal, then the off diagonal elements will be zero
-G # look at G
-# 1, 3, 4, 5 & 6 are non-orthogonal
+#G # look at G: all are non-orthogonal
 
 fam_trl_cntxt <- list(trl_by_cntxt = trl_by_cntxt, #1
-                    trl_at_switch = trl_at_switch, #3
-                    trl_at_same = trl_at_same, #4 
-                    cntxt_at_fstt = cntxt_at_fstt, #5
-                    cntxt_at_subt = cntxt_at_subt) #6
+                      trl_at_switch = trl_at_switch, #2
+                      trl_at_same = trl_at_same, #3 
+                      cntxt_at_fstt = cntxt_at_fstt, #4
+                      cntxt_at_subt = cntxt_at_subt) #5
                                    
-fam_trl_cntxt_by_trn <- list(trl_by_cntxt_by_trn = trl_by_cntxt_by_trn) # 2
 
-list_of_contrast_lists <- list(fam_trl_cntxt, 
-                               fam_trl_cntxt_by_trn)
+list_of_contrast_lists <- list(fam_trl_cntxt)
 ```
 
 Edit the contrasts function.
@@ -795,15 +773,22 @@ get_all_contrasts <- function(this_dv, list_of_contrast_lists){
   theme_pubclean()
   
   # compute contrasts
-  c <- do.call(rbind, lapply(list_of_contrast_lists, function(x) summary(contrast(emm_int, x, adjust='bonferroni'))))
+  con_w <- contrast(emm_int, list_of_contrast_lists)
+  
+  # call PsyR function 
+  out <- psyci(
+    model = mdl,
+    contrast_tables = con_w,
+    method = "ph")
+  
   
   # put result in data frame
-  dt <- data.table(c)
-  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
-  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+  dt <- data.table(out[[1]])
+  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df_num', 'df_error', 'F_value', 'cc', 'lower', 'upper')
+  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p_value', 'p_value_adjusted')]
 
   # return output
-  return(list(means=emm_int, plot=p, contrasts=c, dt=dt))
+  return(list(means=emm_int, plot=p, contrasts=con_w, dt=dt))
 }
 
 
@@ -824,7 +809,7 @@ fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
 write_csv(res$dt, fln)
 
 # show results
-res$contrasts
+print(res$dt)
 ```
 
 ### Setting errors by Search Context
@@ -842,7 +827,7 @@ fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
 write_csv(res$dt, fln)
 
 # show results
-res$contrasts
+print(res$dt)
 ```
 
 ### General errors by Search Context
@@ -859,7 +844,7 @@ fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
 write_csv(res$dt, fln)
 
 # show results
-res$contrasts
+print(res$dt)
 ```
 
 #### Plot Setting Errors and General Errors by Search Context
@@ -967,13 +952,14 @@ fig_tst_err_scntxt <- plot_grid(#plot_tst_acc_scntxt,
                                 rel_heights=c(1, 1),
                                 align="v")
 
-svg('figs/fig_tst_err_searchcontext.svg',
-    width=5, height=6)
-plot(fig_tst_err_scntxt)
-dev.off()
+# svg('figs/fig_tst_err_searchcontext.svg',
+#     width=5, height=6)
+# plot(fig_tst_err_scntxt)
+# dev.off()
 ```
 
 Show final figure.
+
 ```{r}
 include_graphics("figs/fig_tst_err_searchcontext_final.png") 
 ```
@@ -992,7 +978,7 @@ fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
 write_csv(res$dt, fln)
 
 # show results
-res$contrasts
+print(res$dt)
 ```
 
 ### RT subs correct by Search Context
@@ -1009,7 +995,7 @@ fln <- str_glue("res/contrasts_exp-{exp}_ses-{ses}_{var}_by_memgrp.csv")
 write_csv(res$dt, fln)
 
 # show results
-res$contrasts
+print(res$dt)
 ```
 
 #### Plot RTs by Search Context
@@ -1103,13 +1089,14 @@ fig_tst_rt_scntxt <- plot_grid(plot_tst_rt_fc_scntxt,
                                rel_heights=c(1, 1),
                                align="v")
 
-svg('figs/fig_tst_rt_searchcontext.svg',
-    width=5, height=6)
-plot(fig_tst_rt_scntxt)
-dev.off()
+# svg('figs/fig_tst_rt_searchcontext.svg',
+#     width=5, height=6)
+# plot(fig_tst_rt_scntxt)
+# dev.off()
 ```
 
 Show final figure.
+
 ```{r}
 include_graphics("figs/fig_tst_rt_searchcontext_final.png") 
 ```
@@ -1291,16 +1278,18 @@ fig_trn_err <- plot_grid(plot_trn_seterr,
                          rel_heights=c(1, 1),
                          align="v")
 
-svg('figs/fig_trn_err.svg',
-    width=5, height=3)
-plot(fig_trn_err)
-dev.off()
+# svg('figs/fig_trn_err.svg',
+#     width=5, height=3)
+# plot(fig_trn_err)
+# dev.off()
 ```
 
 Show final figure.
+
 ```{r}
 include_graphics("figs/fig_trn_err_final.png") 
 ```
+
 ## Working memory task
 
 Define contrasts for analysis.
@@ -1323,39 +1312,37 @@ cond <- list(
   neither_other = rep(c(1, -1), times=4)
 )
 
-# 1) Performance should be worse on 'other' relative to 'neither' trials during the test session
-neither_v_other_at_test <- cond$neither_other*sess$test
+## a priori contrasts
+
+# 1) Performance should be worse on 'other' relative to 'neither' trials 
+neither_v_other <- cond$neither_other
 
 # 2) The difference in performance on 'other' relative to 'neither' trials should be present at the test session, but not the initial session
 neither_v_other_by_ses <- cond$neither_other*sess$int
 
-# 3) Performance on 'other' relative to 'neither' trials should be worse for the variable relative to the stable group at test
-neither_v_other_at_test_by_grp <- neither_v_other_at_test*train_type$int
-
-# 4) But there should be no difference between groups at the initial session
+# 3) Performance should be worse for the variable group than the stable group
 neither_v_other_by_ses_by_grp <- neither_v_other_by_ses*train_type$int
 
 # test orthogonality
-n_contrasts <- 4
-all_contrasts <- matrix(c(neither_v_other_at_test,
+n_contrasts <- 3
+all_contrasts <- matrix(c(neither_v_other,
                           neither_v_other_by_ses,
-                          neither_v_other_at_test_by_grp,
                           neither_v_other_by_ses_by_grp), 
                         byrow=FALSE, 
                         ncol=n_contrasts)
 
 G <- t(all_contrasts) %*% all_contrasts
-G # 1 & 2 and 3 & 4 are non-orthogonal
+G # all orthogonal
 
 # construct families of tests
-fam_neither_v_other <- list(neither_v_other_at_test = neither_v_other_at_test,
-                            neither_v_other_by_ses = neither_v_other_by_ses)
-fam_neither_v_other_by_grp <- list(neither_v_other_at_test_by_grp = neither_v_other_at_test_by_grp,
-                                   neither_v_other_by_ses_by_grp = neither_v_other_by_ses_by_grp)
+fam_neither_v_other <- list(neither_v_other = neither_v_other)
+fam_neither_v_other_by_ses <- list(neither_v_other_by_ses = neither_v_other_by_ses)
+fam_neither_v_other_by_ses_by_grp <- list(neither_v_other_by_ses_by_grp = neither_v_other_by_ses_by_grp)
 
 # combine families
 list_of_contrast_lists <- list(fam_neither_v_other, 
-                               fam_neither_v_other_by_grp)
+                               fam_neither_v_other_by_ses,
+                               fam_neither_v_other_by_ses_by_grp)
 ```
 
 Edit the contrasts function.
@@ -1529,18 +1516,21 @@ fig_mts <- plot_grid(plot_mts_acc,
                      rel_heights=c(1, 1),
                      align="v")
 
-svg('figs/fig_mts.svg',
-    width=5, height=5)
-plot(fig_mts)
-dev.off()
+# svg('figs/fig_mts.svg',
+#     width=5, height=5)
+# plot(fig_mts)
+# dev.off()
 ```
 
 Show final figure
+
 ```{r}
 include_graphics("figs/fig_mts_final.png") 
 ```
 
 ## Routines analysis
+
+**Note: Haven't updated this since as we decided not to include it in the manuscript.**
 
 Get transition entropy (TE) scores per subject and session.
 
@@ -1648,8 +1638,8 @@ var <- 'TEs'
 res <- get_all_contrasts(var, list_of_contrast_lists)
 
 # save result
-fln <- str_glue("res/contrasts_exp-{exp}_{var}.csv")
-write_csv(res$dt, fln)
+# fln <- str_glue("res/contrasts_exp-{exp}_{var}.csv")
+# write_csv(res$dt, fln)
 
 # show results
 res$contrasts
@@ -1701,17 +1691,249 @@ plot_TEs <- ggplot() +
                   aes(x, y), size=1, color='black') +
   my_theme() 
 
-svg('figs/fig_TE.svg',
-    width=3, height=3)
-plot(plot_TEs)
-dev.off()
+# svg('figs/fig_TE.svg',
+#     width=3, height=3)
+# plot(plot_TEs)
+# dev.off()
 ```
 
 Show final figure.
+
 ```{r}
 include_graphics("figs/fig_TE_final.png") 
 ```
 
+### TE by sub-session
+
+Get transition entropy (TE) scores per subject and session, and sub-session.
+
+```{r}
+# get TE scores per subject and session
+TEs_train <- evt_multi[ses %in% c('training'),
+                 .(TEs=get_TE(door)),
+                 by=c('sub', 'subses', 'train_type')]
+TEs_train$ses <- 'training'
+TEs_test <- evt_multi[ses %in% c('testing'),
+                 .(TEs=get_TE(door)),
+                 by=c('sub', 'train_type')]
+TEs_test$subses <- 3
+TEs_test$ses <- 'testing'
+TEs_subses <- rbind(TEs_train, TEs_test)
+
+```
+
+Define contrasts.
+
+```{r}
+#| output: false
+
+## define contrasts for analysis
+
+# 1) Do TE scores differ between the first and second half of training? 
+train_early_vs_late <- c(1, -1, 0, 1, -1, 0)
+
+# 2) Do TEs scores differ between the first half of training and testing?
+train_early_vs_test <- c(1, 0, -1, 1, 0, -1)
+
+# 3) Do TE scores differ between the second half of training and testing?
+train_late_vs_test <- c(0, 1, -1, 0, 1, -1)
+
+# 4) Does #1 differ by group?
+stable_vs_variable <- c(1, 1, 1, -1, -1, -1)
+train_early_vs_late_by_grp <- train_early_vs_late*stable_vs_variable
+
+# 5) Does #2 differ by group?
+train_early_vs_test_by_grp <- train_early_vs_test*stable_vs_variable
+
+# 6) Does #3 differ by group?
+train_late_vs_test_by_grp <- train_late_vs_test*stable_vs_variable
+
+# now we have our key contrasts, we can check if they are orthogonal.
+n_contrasts <- 6
+all_contrasts <- matrix(c(train_early_vs_late,
+                          train_early_vs_test,
+                          train_late_vs_test,
+                          train_early_vs_late_by_grp,
+                          train_early_vs_test_by_grp,
+                          train_late_vs_test_by_grp),
+                        byrow=FALSE,
+                        ncol=n_contrasts)
+
+G <- t(all_contrasts) %*% all_contrasts
+G # look at G: can't separate them, all need to be in 1 big family
+
+fam_test <- list(train_early_vs_late = train_early_vs_late, # 1
+                 train_early_vs_test = train_early_vs_test, # 2
+                 train_late_vs_test = train_late_vs_test) # 3
+
+fam_test_grp <- list(train_early_vs_late_by_grp = train_early_vs_late_by_grp, # 4
+                 train_early_vs_test_by_grp = train_early_vs_test_by_grp, # 5
+                 train_late_vs_test_by_grp = train_late_vs_test_by_grp) # 6
+
+list_of_contrast_lists <- list(fam_test, fam_test_grp)
+
+```
+
+Edit the contrasts function.
+
+```{r}
+get_all_contrasts <- function(this_dv, list_of_contrast_lists){
+
+  # specify model
+  mdl <- aov_ez(id = 'sub',
+                within = 'subses',
+                between = 'train_type',
+                dv = this_dv,
+                data = TEs_subses)
+
+  # generate means
+  emm_int <- emmeans(mdl, c('subses', 'train_type'))
+  # plot
+  p <- afex_plot(mdl,
+          x = 'subses',
+          trace = 'train_type',
+          # panel = 'ses',
+          error = "none",
+          data_plot = F) +
+  theme_pubclean()
+
+  # compute contrasts
+  c <- do.call(rbind, lapply(list_of_contrast_lists, function(x) summary(contrast(emm_int, x, adjust='bonferroni'))))
+
+  # put result in data frame
+  dt <- data.table(c)
+  dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('estimate', 'SE', 'df', 't.ratio')
+  ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('p.value')]
+  # return output
+  return(list(means=emm_int, plot=p, contrasts=c, dt=dt))
+}
+
+```
+
+Run analysis and show descriptive statistics.
+
+```{r}
+
+# get TE descriptive statistics
+TEs_subses[, .(meanTEs=mean(TEs),
+    seTEs=sd(TEs)/sqrt(.N)),
+    by=c('ses', 'subses', 'train_type')]
+
+# assign variable label
+var <- 'TEs'
+
+# compute contrasts
+# res <- get_all_contrasts(var, list_of_contrast_lists)
+
+# show results
+res$contrasts
+```
+
+Run post-hoc tests to look at difference difference in TE scores between second half of training session and the testing session, separately for each group.
+
+```{r}
+#| output: false
+
+## define contrasts for analysis
+
+# 1) Do TE scores differ between the second half of training and testing for the stable group?
+train_late_vs_test_stable <- c(0, 1, -1, 0, 0, 0)
+
+# 2) Do TE scores differ between the second half of training and testing for the variable group?
+train_late_vs_test_variable <- c(0, 0, 0, 0, 1, -1)
+
+# now we have our key contrasts, we can check if they are orthogonal.
+n_contrasts <- 2
+all_contrasts <- matrix(c(train_late_vs_test_stable,
+                          train_late_vs_test_variable),
+                        byrow=FALSE,
+                        ncol=n_contrasts)
+
+G <- t(all_contrasts) %*% all_contrasts
+#G # look at G: can't separate them, all need to be in 1 big family
+
+fam_test_stable <- list(train_late_vs_test_stable = train_late_vs_test_stable) # 1
+
+fam_test_variable <- list(train_late_vs_test_variable = train_late_vs_test_variable) # 2
+
+list_of_contrast_lists <- list(fam_test_stable, fam_test_variable)
+```
+
+Run analysis
+
+```{r}
+# assign variable label
+var <- 'TEs'
+
+# compute contrasts
+res_ph <- get_all_contrasts(var, list_of_contrast_lists)
+
+# save results
+# fln <- str_glue("res/contrasts_exp-{exp}_{var}_subses.csv")
+# write_csv(rbind(res$dt, res_ph$dt), fln)
+
+# show results
+res_ph$contrasts
+```
+
+#### Plot TE scores by sub-session
+
+```{r}
+#| output: false
+TEs_gav <- TEs_subses[, 
+               .(gavTE=mean(TEs)),
+               by=c('train_type', 'subses')]
+
+plot_TEs <- ggplot() +
+  
+  geom_point(data=TEs_subses,
+             aes(x=subses,
+                 y=TEs,
+                 color=train_type),
+             alpha=0.3,
+             position=position_jitterdodge(jitter.width = 0.1,
+                                           dodge.width = 0.5)) +
+  geom_line(data=TEs_gav,
+            aes(x=subses, 
+                y=gavTE, 
+                color=train_type,
+                group=train_type),
+            linetype=2, 
+            position=position_dodge(width = 0.5)) +
+  geom_point(data=TEs_gav,
+             aes(x=subses, 
+                 y=gavTE, 
+                 color=train_type),
+             fill='white',
+             alpha=1,
+             size=3,
+             stroke=1.25,
+             shape=23,
+             position=position_dodge(width = 0.5)) +
+  
+  # customise
+  scale_color_tableau() +
+  scale_y_continuous(name='Transition Entropy',
+                     breaks=c(0, 5, 10, 15, 20),
+                     labels=c('0', '5', '10', '15', '20')) +
+  scale_x_continuous(name='Session',
+                   breaks=c(1,2,3),
+                   labels=c('Training early', 'Training late', 'Testing')) +
+  geom_rangeframe(data=data.frame(x=c(1, 3), y=c(0, 20)),
+                  aes(x, y), size=1, color='black') +
+  my_theme() 
+# 
+# svg('figs/fig_TE_by subses.svg',
+#     width=5, height=3)
+# plot(plot_TEs)
+# dev.off()
+```
+
+Show final figure.
+
+```{r}
+include_graphics("figs/fig_TE_by_subses_final.png") 
+```
 
 ### TE and multitasking costs
 
@@ -1730,16 +1952,16 @@ avg_multi_tst_wide <- dcast(avg_multi[ses=='testing'],
 avg_multi_tst_diff <- avg_multi_tst_wide[,
               .(set_err_diff_first = setting_errors_mean_other_first - setting_errors_mean_none_first,
                 gen_err_diff_first = general_errors_mean_neither_first - general_errors_mean_none_first,
-                rt_first_cor_diff_first = ((rt_first_correct_mean_other_first + rt_first_correct_mean_neither_first)/2) -  rt_first_correct_mean_none_first,
+                rt_first_cor_diff_first = (((rt_first_correct_mean_other_first + rt_first_correct_mean_neither_first)/2) -  rt_first_correct_mean_none_first)/(((rt_first_correct_mean_other_first + rt_first_correct_mean_neither_first)/2) +  rt_first_correct_mean_none_first),
               set_err_diff_subsequent = setting_errors_mean_other_subsequent - setting_errors_mean_none_subsequent,
                gen_err_diff_subsequent = general_errors_mean_neither_subsequent - general_errors_mean_none_subsequent,
-              rt_first_cor_diff_subsequent = ((rt_first_correct_mean_other_subsequent + rt_first_correct_mean_neither_subsequent)/2) -  rt_first_correct_mean_none_subsequent),
+              rt_first_cor_diff_subsequent = (((rt_first_correct_mean_other_subsequent + rt_first_correct_mean_neither_subsequent)/2) -  rt_first_correct_mean_none_subsequent)/(((rt_first_correct_mean_other_subsequent + rt_first_correct_mean_neither_subsequent)/2) + rt_first_correct_mean_none_subsequent)),
               by=c('sub', 'ses')]
 
 avg_multi_tst_diff[, ':=' 
                    (set_err_diff = set_err_diff_first - set_err_diff_subsequent,
                     gen_err_diff = gen_err_diff_first - gen_err_diff_subsequent,
-                    rt_first_cor_diff = rt_first_cor_diff_first - rt_first_cor_diff_subsequent)]
+                    rt_first_cor_diff = (rt_first_cor_diff_first - rt_first_cor_diff_subsequent)/(rt_first_cor_diff_first + rt_first_cor_diff_subsequent))]
              
 
 # merge data frames
@@ -1770,8 +1992,8 @@ dt[, names(.SD) := lapply(.SD, round, 2), .SDcols=c('Estimate', 'Std..Error', 't
   ][, names(.SD) := lapply(.SD, round, 3), .SDcols=c('Pr...t..')]
 
 # save result
-fln <- str_glue("res/lms_exp-{exp}_TE_diff.csv")
-write_csv(dt, fln)
+# fln <- str_glue("res/lms_exp-{exp}_TE_diff.csv")
+# write_csv(dt, fln)
 ```
 
 The above analysis produces 1 significant result: An effect in the Stable group for RT First Correct on subsequent multitasking trials. However, the p-value is only 0.026, so it wouldn't survive correction for the 9 different models that I ran.
@@ -1811,8 +2033,8 @@ dt <- data.table(
 )
 
 # save result
-fln <- str_glue("res/lms_exp-{exp}_TE_FFMQ.csv")
-write_csv(dt, fln)
+# fln <- str_glue("res/lms_exp-{exp}_TE_FFMQ.csv")
+# write_csv(dt, fln)
 ```
 
 No association between mindfulness and TE for either training group during the training session:
