@@ -146,10 +146,10 @@ none_v_multi_by_trl <- none_v_multi*multi_trial$int
 # 3) Is there task-specific interference
 neither_v_other <- multi_cond$neither_other
 
-# 5) Does the task-specific interference depend on trial 
+# 4) Does the task-specific interference depend on trial 
 neither_v_other_by_trl <- neither_v_other*multi_trial$int
 
-# 4) Does the task-specific interference depend on trial and train type
+# 5) Does the task-specific interference depend on trial and train type
 neither_v_other_by_trl_by_grp <- neither_v_other_by_trl*train_type$int
 
 # now we have our key contrasts, we can check if they are orthogonal.
@@ -857,7 +857,7 @@ avg_multi_memgrp_p <- avg_multi_memgrp[ses=='testing',
                            general_errors_mean=mean(general_errors_mean, na.rm=T),
                            rt_first_correct_mean=mean(rt_first_correct_mean, na.rm=T),
                            rt_subs_correct_mean=mean(rt_subs_correct_mean, na.rm=T)),
-                         by=c('train_type', 'multi_trial', 'search_context', 'sub')]
+                         by=c('multi_trial', 'search_context', 'sub')]
 
 avg_multi_gav_tst_memgrp <- avg_multi_memgrp_p[,
                          .(accuracy_mean=mean(accuracy_mean, na.rm=T),
@@ -865,92 +865,104 @@ avg_multi_gav_tst_memgrp <- avg_multi_memgrp_p[,
                            general_errors_mean=mean(general_errors_mean, na.rm=T),
                            rt_first_correct_mean=mean(rt_first_correct_mean, na.rm=T),
                            rt_subs_correct_mean=mean(rt_subs_correct_mean, na.rm=T)),
-                         by=c('train_type', 'multi_trial', 'search_context')]
+                         by=c('multi_trial', 'search_context')]
 
 plot_tst_seterr_scntxt <- ggplot() +
-  geom_point(data=avg_multi_memgrp_p,
-             aes(x=multi_trial,
-                 y=setting_errors_mean,
-                 color=train_type),
-             alpha=0.3,
-             position=position_jitterdodge(jitter.width = 0.1,
-                                           dodge.width = 0.5)) +
+  # geom_point(data=avg_multi_memgrp_p,
+  #            aes(x=multi_trial,
+  #                y=setting_errors_mean,
+  #                color=search_context),
+  #            alpha=0.3,
+  #            position=position_jitterdodge(jitter.width = 0.1,
+  #                                          dodge.width = 0.5)) +
   geom_line(data=avg_multi_gav_tst_memgrp,
             aes(x=multi_trial, 
-                y=setting_errors_mean, 
-                color=train_type,
-                group=interaction(search_context, train_type)),
+                y=setting_errors_mean,
+                group=search_context,
+                color=search_context),
             linetype=2, 
             position=position_dodge(width = 0.5)) +
   geom_point(data=avg_multi_gav_tst_memgrp,
              aes(x=multi_trial, 
-                 y=setting_errors_mean, 
-                 color=train_type),
+                 y=setting_errors_mean,
+                 color=search_context),
              fill='white',
              alpha=1,
              size=3,
              stroke=1.25,
              shape=23,
              position=position_dodge(width = 0.5)) +
-  facet_wrap(~fct_rev(search_context)) +
+  #facet_wrap(~fct_rev(search_context)) +
   
   # customise
-  scale_color_tableau() +
-  scale_y_continuous(name='Setting Errors (%)',
-                     breaks=c(0, 0.2, 0.4, 0.6, 0.8),
-                     labels=c('0', '20', '40', '60', '80')) +
+  scale_color_tableau(palette="Classic Purple-Gray 6") +
+  # scale_y_continuous(name='Error rate (%)',
+  #                    breaks=c(0, 0.2, 0.4, 0.6, 0.8),
+  #                    labels=c('0', '20', '40', '60', '80')) +
+  scale_y_continuous(name='Error rate (%)',
+                     breaks=c(0, 0.05, 0.1, 0.15),
+                     labels=c('0', '5', '10', '15')) +
   scale_x_discrete(name='Multitasking Trial',
                    labels=c('first', 'subs')) +
-  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 0.8)),
+  # geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 0.8)),
+  #                 aes(x, y), size=1, color='black') +
+  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 0.15)),
                   aes(x, y), size=1, color='black') +
   my_theme() + theme(legend.position = c(0.8, 0.5))
 
 
 plot_tst_generr_scntxt <- ggplot() +
-  geom_point(data=avg_multi_memgrp_p,
-             aes(x=multi_trial,
-                 y=general_errors_mean,
-                 color=train_type),
-             alpha=0.3,
-             position=position_jitterdodge(jitter.width = 0.1,
-                                           dodge.width = 0.5)) +
+  # geom_point(data=avg_multi_memgrp_p,
+  #            aes(x=multi_trial,
+  #                y=general_errors_mean,
+  #                color=search_context),
+  #            alpha=0.3,
+  #            position=position_jitterdodge(jitter.width = 0.1,
+  #                                          dodge.width = 0.5)) +
   geom_line(data=avg_multi_gav_tst_memgrp,
             aes(x=multi_trial, 
                 y=general_errors_mean, 
-                color=train_type,
-                group=interaction(search_context, train_type)),
+                color=search_context,
+                group=search_context),
             linetype=2, 
             position=position_dodge(width = 0.5)) +
   geom_point(data=avg_multi_gav_tst_memgrp,
              aes(x=multi_trial, 
                  y=general_errors_mean, 
-                 color=train_type),
+                 color=search_context),
              fill='white',
              alpha=1,
              size=3,
              stroke=1.25,
              shape=23,
              position=position_dodge(width = 0.5)) +
-  facet_wrap(~fct_rev(search_context)) +
+  #facet_wrap(~fct_rev(search_context)) +
   
   # customise
-  scale_color_tableau() +
-  scale_y_continuous(name='General Errors (%)',
-                     breaks=c(0, 0.2, 0.4, 0.6, 0.8),
-                     labels=c('0', '20', '40', '60', '80')) +
+  scale_color_tableau(palette="Classic Purple-Gray 6") +
+  # scale_y_continuous(name='Error rate (%)',
+  #                    breaks=c(0, 0.2, 0.4, 0.6, 0.8),
+  #                    labels=c('0', '20', '40', '60', '80')) +
+  scale_y_continuous(name='Error rate (%)',
+                     breaks=c(0, 0.05, 0.1),
+                     labels=c('0', '5', '10')) +
   scale_x_discrete(name='Multitasking Trial',
                    labels=c('first', 'subs')) +
-  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 0.8)),
+  # geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 0.8)),
+  #                 aes(x, y), size=1, color='black') +
+  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 0.1)),
                   aes(x, y), size=1, color='black') +
   my_theme() 
-
-fig_tst_err_scntxt <- plot_grid(#plot_tst_acc_scntxt, 
-                                plot_tst_seterr_scntxt, 
-                                plot_tst_generr_scntxt,
-                                ncol=1, nrow=2,
-                                axis='tlbr',
-                                rel_heights=c(1, 1),
-                                align="v")
+# 
+# fig_tst_err_scntxt <- plot_grid(#plot_tst_acc_scntxt, 
+#                                 plot_tst_seterr_scntxt, 
+#                                 plot_tst_generr_scntxt,
+#                                 ncol=2, nrow=1,
+#                                 labels = c('a) Setting errors', 
+#                                            'b) General errors'),
+#                                 axis='tlbr',
+#                                 rel_heights=c(1, 1),
+#                                 align="v")
 
 # svg('figs/fig_tst_err_searchcontext.svg',
 #     width=5, height=6)
@@ -961,7 +973,7 @@ fig_tst_err_scntxt <- plot_grid(#plot_tst_acc_scntxt,
 Show final figure.
 
 ```{r}
-include_graphics("figs/fig_tst_err_searchcontext_final.png") 
+#include_graphics("figs/fig_tst_err_searchcontext_final.png") 
 ```
 
 ### RT_first_correct by Search Context
@@ -1004,101 +1016,132 @@ print(res$dt)
 #| output: false
 
 plot_tst_rt_fc_scntxt <- ggplot() +
-  geom_point(data=avg_multi_memgrp_p,
-             aes(x=multi_trial,
-                 y=rt_first_correct_mean,
-                 color=train_type),
-             alpha=0.3,
-             position=position_jitterdodge(jitter.width = 0.1,
-                                           dodge.width = 0.5)) +
+  # geom_point(data=avg_multi_memgrp_p,
+  #            aes(x=multi_trial,
+  #                y=rt_first_correct_mean,
+  #                color=train_type),
+  #            alpha=0.3,
+  #            position=position_jitterdodge(jitter.width = 0.1,
+  #                                          dodge.width = 0.5)) +
   geom_line(data=avg_multi_gav_tst_memgrp,
             aes(x=multi_trial, 
                 y=rt_first_correct_mean, 
-                color=train_type,
-                group=interaction(search_context, train_type)),
+                color=search_context,
+                group=search_context),
             linetype=2, 
             position=position_dodge(width = 0.5)) +
   geom_point(data=avg_multi_gav_tst_memgrp,
              aes(x=multi_trial, 
                  y=rt_first_correct_mean, 
-                 color=train_type),
+                 color=search_context),
              fill='white',
              alpha=1,
              size=3,
              stroke=1.25,
              shape=23,
              position=position_dodge(width = 0.5)) +
-  facet_wrap(~fct_rev(search_context)) +
+  #facet_wrap(~fct_rev(search_context)) +
   
   # customise
-  scale_color_tableau() +
+  scale_color_tableau(palette="Classic Purple-Gray 6") +
+  # scale_y_continuous(name='Reaction Time (s)',
+  #                    breaks=c(0, 0.5, 1, 1.5, 2, 2.5),
+  #                    labels=c('0.0', '0.5', '1.0', '1.5', '2.0', '2.5'),
+  #                    limits=c(0, 2.7)) +
   scale_y_continuous(name='Reaction Time (s)',
-                     breaks=c(0, 0.5, 1, 1.5, 2, 2.5),
-                     labels=c('0.0', '0.5', '1.0', '1.5', '2.0', '2.5'),
-                     limits=c(0, 2.7)) +
+                     breaks=c(0, 0.5, 1, 1.5, 2),
+                     labels=c('0.0', '0.5', '1.0', '1.5', '2.0')) +
   scale_x_discrete(name='Multitasking Trial',
                    labels=c('first', 'subs')) +
-  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 2.5)),
+  # geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 2.5)),
+  #                 aes(x, y), size=1, color='black') +
+  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 2)),
                   aes(x, y), size=1, color='black') +
   my_theme() + theme(legend.position = c(0.8, 0.7))
 
 
 plot_tst_rt_sc_scntxt <- ggplot() +
-  geom_point(data=avg_multi_memgrp_p,
-             aes(x=multi_trial,
-                 y=rt_subs_correct_mean,
-                 color=train_type),
-             alpha=0.3,
-             position=position_jitterdodge(jitter.width = 0.1,
-                                           dodge.width = 0.5)) +
+  # geom_point(data=avg_multi_memgrp_p,
+  #            aes(x=multi_trial,
+  #                y=rt_subs_correct_mean,
+  #                color=train_type),
+  #            alpha=0.3,
+  #            position=position_jitterdodge(jitter.width = 0.1,
+  #                                          dodge.width = 0.5)) +
   geom_line(data=avg_multi_gav_tst_memgrp,
             aes(x=multi_trial, 
                 y=rt_subs_correct_mean, 
-                color=train_type,
-                group=interaction(search_context, train_type)),
+                color=search_context,
+                group=search_context),
             linetype=2, 
             position=position_dodge(width = 0.5)) +
   geom_point(data=avg_multi_gav_tst_memgrp,
              aes(x=multi_trial, 
                  y=rt_subs_correct_mean, 
-                 color=train_type),
+                 color=search_context),
              fill='white',
              alpha=1,
              size=3,
              stroke=1.25,
              shape=23,
              position=position_dodge(width = 0.5)) +
-  facet_wrap(~fct_rev(search_context)) +
+  #facet_wrap(~fct_rev(search_context)) +
   
   # customise
-  scale_color_tableau() +
+  scale_color_tableau(palette="Classic Purple-Gray 6") +
+  # scale_y_continuous(name='Reaction Time (s)',
+  #                    breaks=c(0, 0.5, 1, 1.5, 2, 2.5),
+  #                    labels=c('0.0', '0.5', '1.0', '1.5', '2.0', '2.5'),
   scale_y_continuous(name='Reaction Time (s)',
-                     breaks=c(0, 0.5, 1, 1.5, 2, 2.5),
-                     labels=c('0.0', '0.5', '1.0', '1.5', '2.0', '2.5'),
-                     limits=c(0, 2.7)) +
+                     breaks=c(0, 0.5, 1),
+                     labels=c('0.0', '0.5', '1.0')) +
   scale_x_discrete(name='Multitasking Trial',
                    labels=c('first', 'subs')) +
-  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 2.5)),
+  # geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 2)),
+  #                 aes(x, y), size=1, color='black') +
+  geom_rangeframe(data=data.frame(x=c(1, 2), y=c(0, 1)),
                   aes(x, y), size=1, color='black') +
   my_theme() 
 
-fig_tst_rt_scntxt <- plot_grid(plot_tst_rt_fc_scntxt,
-                               plot_tst_rt_sc_scntxt,
-                               ncol=1, nrow=2,
-                               axis='tlbr',
-                               rel_heights=c(1, 1),
-                               align="v")
+# fig_tst_rt_scntxt <- plot_grid(plot_tst_rt_fc_scntxt,
+#                                plot_tst_rt_sc_scntxt,
+#                                ncol=2, nrow=1,
+#                                axis='tlbr',
+#                                rel_heights=c(1, 1),
+#                                align="v")
 
 # svg('figs/fig_tst_rt_searchcontext.svg',
 #     width=5, height=6)
 # plot(fig_tst_rt_scntxt)
 # dev.off()
+
+# create one figure for all search context variables
+fig_tst_scntxt <- plot_grid(plot_tst_seterr_scntxt,
+                            plot_tst_generr_scntxt,
+                            plot_tst_rt_fc_scntxt,
+                            plot_tst_rt_sc_scntxt,
+                            labels = c('a) Setting errors', 
+                                       'b) General errors',
+                                       'c) First correct click',
+                                       'd) Subs. correct click'),
+                            ncol=2, nrow=2,
+                            axis='tlbr',
+                            rel_heights=c(1, 1),
+                            align="v")
+
+svg('figs/fig_tst_searchcontext.svg',
+    width=7, height=6)
+plot(fig_tst_scntxt)
+dev.off()
+
 ```
+
+#### Plot RT and Error by Search Context
 
 Show final figure.
 
 ```{r}
-include_graphics("figs/fig_tst_rt_searchcontext_final.png") 
+include_graphics("figs/fig_tst_searchcontext_final.png") 
 ```
 
 ## Training session
